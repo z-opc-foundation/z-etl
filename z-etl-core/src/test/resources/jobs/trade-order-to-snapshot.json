@@ -1,0 +1,35 @@
+{
+  "job": {
+    "name": "trade-order-to-snapshot-json",
+    "description": "同一份作业的 JSON 形态（与 yml 形态等价）",
+    "mode": "auto",
+    "source": {
+      "dataSourceRef": "ds-oc-main",
+      "table": "z_trade_order",
+      "columns": ["id", "order_no", "user_id", "amount", "status", "updated_at"],
+      "watermarkColumn": "updated_at",
+      "pageSize": 200
+    },
+    "transform": {
+      "fieldMappings": [
+        {"source": "id", "target": "order_id", "type": "LONG"},
+        {"source": "order_no", "target": "order_no", "type": "STRING"},
+        {"source": "user_id", "target": "user_id", "type": "LONG"},
+        {"source": "amount", "target": "amount", "type": "BIGDECIMAL"},
+        {"source": "status", "target": "status", "type": "INT"},
+        {"source": "updated_at", "target": "updated_at", "type": "TIMESTAMP"}
+      ]
+    },
+    "target": {
+      "dataSourceRef": "ds-etl-landing",
+      "table": "etl_trade_order_snapshot",
+      "batchSize": 100,
+      "writeMode": "upsert"
+    },
+    "idempotencyKey": ["order_id"],
+    "watermark": {
+      "column": "updated_at",
+      "type": "TIMESTAMP"
+    }
+  }
+}

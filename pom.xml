@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        z-etl —— ETL 引擎仓（reader → transform 链 → writer，JSON/yml 描述的 job 模型）。
+
+        工程形状照抄 z-trade（{core,web} 两段式 + 自管 parent）：
+          parent = io.github.yuku123:z-boot-parent:1.1.0（第三方地板与兄弟仓权威表由父链直供）
+          版本   = CI-friendly ${revision} + flatten-maven-plugin(oss)
+          发版   = -Pcentral 手动激活（dormant，本轮不激活、不发中央）
+
+        ⚠️ groupId 口径的由来（卡面写的是 com.zifang，这里按卡的后半句落定）：
+        卡内原话「groupId com.zifang；『不发中央』口径**不适用** ⇒ 若要宿主引用，对齐 z-dms 的发版口径，
+        开工时先读 z-dms 仓的实际做法再定」。
+        本仓开工时 z-dms 仓在本机**不存在**（TASK-20261012-011 仍在 pending/，目录 z-dms 无），
+        无可照抄的实际做法 ⇒ 改按卡给的形状参考 z-trade 的**实际 pom 做法**落定：
+          groupId = io.github.yuku123（中央发布 namespace，见 lead 005_技术架构/006 §5.1 P0）
+          parent  = z-boot-parent:1.1.0（与 z-trade / z-team 同款火车）
+        包名沿用组织惯例 com.zifang.z.etl.*（与 z-trade 的 com.zifang.z.trade.* 同格）。
+        z-dms 落地后如与本口径不一致，只需改本文件 groupId 与两个子模块的 <parent> 三处。
+    -->
+    <parent>
+        <groupId>io.github.yuku123</groupId>
+        <artifactId>z-boot-parent</artifactId>
+        <version>1.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>io.github.yuku123</groupId>
+    <artifactId>z-etl</artifactId>
+    <version>${revision}</version>
+    <packaging>pom</packaging>
+
+    <name>z-etl</name>
+    <description>ETL 引擎仓：job = reader → transform 链 → writer，JSON/yml 描述（DataX 式）</description>
+
+    <url>https://github.com/z-opc-foundation/z-etl</url>
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>yuku123</id>
+            <name>yuku123</name>
+            <email>1340947819@qq.com</email>
+            <organization>z-opc-foundation</organization>
+            <organizationUrl>https://github.com/z-opc-foundation</organizationUrl>
+            <timezone>+08:00</timezone>
+            <roles>
+                <role>owner</role>
+            </roles>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:https://github.com/z-opc-foundation/z-etl.git</connection>
+        <developerConnection>scm:git:git@github.com:z-opc-foundation/z-etl.git</developerConnection>
+        <url>https://github.com/z-opc-foundation/z-etl</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <modules>
+        <module>z-etl-core</module>
+        <module>z-etl-web</module>
+    </modules>
+
+    <properties>
+        <!-- 项目自身版本(CI-friendly 根,发版改这一处;flatten oss 模式在 process-resources
+             把它写死进发布 pom)。首版号 = 1.0.0。 -->
+        <revision>1.0.0</revision>
+
+        <!-- 版本口径全部由 parent 下发(maven.compiler.source/target=8、UTF-8、
+             flatten-maven-plugin.version=1.7.3、maven-compiler-plugin.version=3.11.0)。
+             这里只留父链不供的键: -->
+        <compile.version>8</compile.version>
+        <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
+        <maven-source-plugin.version>3.3.0</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>
+        <maven-gpg-plugin.version>3.2.7</maven-gpg-plugin.version>
+        <central-publishing-plugin.version>0.8.0</central-publishing-plugin.version>
+        <versions-maven-plugin.version>2.17.1</versions-maven-plugin.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- 自家 reactor 坐标钉本仓版本(z-boot README「消费模型」步骤 4)。
+                 写 ${revision} 而非 ${project.version}:根版本本身就是 ${revision},插值时机不依赖
+                 Maven 版本(z-trade / z-config 同款写法)。 -->
+            <dependency>
+                <groupId>io.github.yuku123</groupId>
+                <artifactId>z-etl</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.yuku123</groupId>
+                <artifactId>z-etl-core</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.yuku123</groupId>
+                <artifactId>z-etl-web</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- snakeyaml 直条目压回(非 import):spring-boot-dependencies 地板是 1.30,
+                 2.0 压住 CVE-2022-1471。与 z-trade / z-opc 根同格同值;
+                 要求按坐标写直接条目的正是家族规范(z-config 注释原文:import 顶不住继承来的条目)。
+                 本仓用 snakeyaml 解析 job 描述的 yml 形态。 -->
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>2.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- 全仓统一测试台(与 z-trade 同款;版本由 floor/spring-boot junit-bom 下发)。 -->
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <source>${compile.version}</source>
+                    <target>${compile.version}</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <version>${maven-deploy-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>versions-maven-plugin</artifactId>
+                <version>${versions-maven-plugin.version}</version>
+                <configuration>
+                    <generateBackupPoms>false</generateBackupPoms>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>${flatten-maven-plugin.version}</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <!-- oss 模式:保留 Central 元数据(url/licenses/developers/scm)、剥掉
+                         <parent>/<dependencyManagement>/<build>,并把 ${revision} 与继承来的
+                         依赖版本写死。 -->
+                    <flattenMode>oss</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- 发 Central 时 -Pcentral 手动激活(dormant 时零开销);配置与 z-trade 逐字同款。
+         ⚠️ 本仓本轮**不激活**该 profile、不发中央(卡面硬边界)。 -->
+    <profiles>
+        <profile>
+            <id>central</id>
+            <properties>
+                <maven.javadoc.skip>false</maven.javadoc.skip>
+                <central.gpg.skip>false</central.gpg.skip>
+            </properties>
+            <distributionManagement>
+                <repository>
+                    <id>central</id>
+                    <url>https://central.sonatype.com</url>
+                </repository>
+                <snapshotRepository>
+                    <id>central</id>
+                    <url>https://central.sonatype.com</url>
+                </snapshotRepository>
+            </distributionManagement>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <version>${maven-deploy-plugin.version}</version>
+                        <configuration><skip>true</skip></configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven-javadoc-plugin.version}</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <failOnError>false</failOnError>
+                            <failOnWarnings>false</failOnWarnings>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <phase>verify</phase>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <configuration>
+                            <skip>${central.gpg.skip}</skip>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                                <arg>--no-tty</arg>
+                            </gpgArguments>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <tokenAuth>true</tokenAuth>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>uploaded</waitUntil>
+                            <waitMaxTime>1800</waitMaxTime>
+                            <waitPollingInterval>10</waitPollingInterval>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>

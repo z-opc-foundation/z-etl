@@ -1,0 +1,27 @@
+job:
+  name: trade-order-to-snapshot
+  description: "z-trade 订单表 → ETL 落地表（初始化全量 → 自动切增量）"
+  mode: auto
+  source:
+    dataSourceRef: ds-oc-main
+    table: z_trade_order
+    columns: [id, order_no, user_id, amount, status, updated_at]
+    watermarkColumn: updated_at
+    pageSize: 200
+  transform:
+    fieldMappings:
+      - {source: id,         target: order_id,   type: LONG}
+      - {source: order_no,   target: order_no,   type: STRING}
+      - {source: user_id,    target: user_id,    type: LONG}
+      - {source: amount,     target: amount,     type: BIGDECIMAL}
+      - {source: status,     target: status,     type: INT}
+      - {source: updated_at, target: updated_at, type: TIMESTAMP}
+  target:
+    dataSourceRef: ds-etl-landing
+    table: etl_trade_order_snapshot
+    batchSize: 100
+    writeMode: upsert
+  idempotencyKey: [order_id]
+  watermark:
+    column: updated_at
+    type: TIMESTAMP

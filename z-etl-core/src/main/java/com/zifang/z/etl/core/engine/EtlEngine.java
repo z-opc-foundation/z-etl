@@ -2,10 +2,12 @@ package com.zifang.z.etl.core.engine;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
+import com.zifang.z.etl.core.job.ExpressionSpec;
 import com.zifang.z.etl.core.job.FieldMapping;
 import com.zifang.z.etl.core.job.JobDescriptor;
 import com.zifang.z.etl.core.job.JobDescriptorValidator;
 import com.zifang.z.etl.core.job.JobMode;
+import com.zifang.z.etl.core.job.ScriptSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.job.TargetSpec;
 import com.zifang.z.etl.core.job.TransformSpec;
@@ -14,9 +16,13 @@ import com.zifang.z.etl.core.reader.RowConsumer;
 import com.zifang.z.etl.core.reconcile.ReconciliationReport;
 import com.zifang.z.etl.core.reconcile.Reconciler;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.transform.ExpressionTransformer;
 import com.zifang.z.etl.core.transform.FieldMappingTransformer;
 import com.zifang.z.etl.core.transform.RowTransformer;
+import com.zifang.z.etl.core.transform.ScriptSandbox;
+import com.zifang.z.etl.core.transform.ScriptTransformer;
 import com.zifang.z.etl.core.transform.TransformChain;
+import com.zifang.z.etl.core.transform.TypeNormalizationTransformer;
 import com.zifang.z.etl.core.util.RowValues;
 import com.zifang.z.etl.core.writer.JdbcUpsertWriter;
 
@@ -111,7 +117,14 @@ public class EtlEngine {
                 incremental ? watermarkBefore : null,
                 watermarkType);
 
-        TransformChain chain = buildChain(descriptor.getTransform());
+        TransformChain chain;
+        ScriptSandbox sandbox = new ScriptSandbox();
+        try {
+            chain = buildChain(descriptor.getTransform(), sandbox);
+        } catch (RuntimeException e) {
+            sandbox.close();
+            throw e;
+        }
         List<String> keyColumns = new ArrayList<String>(descriptor.getIdempotencyKey());
         JdbcUpsertWriter writer = new JdbcUpsertWriter(targetDs, targetSpec, keyColumns,
                 targetColumns(descriptor, targetSpec));
@@ -135,6 +148,7 @@ public class EtlEngine {
             throw new IllegalStateException("作业 " + descriptor.getName() + " 执行失败: " + e.getMessage(), e);
         } finally {
             writer.close();
+            sandbox.close();
         }
 
         result.setRowsRead(read[0]);
@@ -153,11 +167,11 @@ public class EtlEngine {
             result.addNote("该作业未声明水位列，只能全量跑");
         }
 
-        // 对账（行数 + 校验和双口径）
+        // 对账（行数 + 校验和双口径；源侧按作业实际取数口径复现：过滤下推 / 聚合下推都算进去）
         ReconciliationReport report;
         try {
-            report = reconciler.reconcile(sourceDs, sourceSpec.getTable(),
-                    sourceKeyColumns(descriptor), targetDs, targetSpec.getTable(), keyColumns);
+            report = reconciler.reconcile(sourceDs, sourceSpec, sourceKeyColumns(descriptor),
+                    targetDs, targetSpec.getTable(), keyColumns);
         } catch (java.sql.SQLException e) {
             throw new IllegalStateException("作业 " + descriptor.getName() + " 对账失败: " + e.getMessage(), e);
         }
@@ -204,33 +218,63 @@ public class EtlEngine {
         return false;
     }
 
-    /** transform 链：目前只有字段映射一种算子；表达式/脚本算子由 TASK-20261012-015 追加。 */
-    private TransformChain buildChain(TransformSpec transform) {
+    /**
+     * transform 链：字段映射 → 行级表达式 → 脚本沙箱 → 类型归一（链尾收口）。
+     *
+     * <p>顺序口径：
+     * <ol>
+     *   <li>字段映射先做 —— 表达式与脚本看到的列名就是**目标列名**（不是源列名）。</li>
+     *   <li>表达式与脚本产出新列，类型归一最后统一收口（含定点小数位）。</li>
+     * </ol>
+     */
+    private TransformChain buildChain(TransformSpec transform, ScriptSandbox sandbox) {
         TransformChain chain = new TransformChain();
         chain.add(new FieldMappingTransformer(transform));
+        chain.add(new ExpressionTransformer(transform == null ? null : transform.getExpressions(), sandbox));
+        chain.add(new ScriptTransformer(transform == null ? null : transform.getScripts(), sandbox));
+        chain.add(new TypeNormalizationTransformer(transform == null ? null : transform.getTypeNormalizations()));
         return chain;
     }
 
-    /** 目标列：声明优先；否则由字段映射推导（映射为空则由首行推导）。 */
+    /** 目标列：声明优先；否则由字段映射 + 表达式 + 脚本产出推导。 */
     private List<String> targetColumns(JobDescriptor descriptor, TargetSpec targetSpec) {
         if (targetSpec.getColumns() != null && !targetSpec.getColumns().isEmpty()) {
             return targetSpec.getColumns();
         }
         TransformSpec transform = descriptor.getTransform();
+        List<String> columns = new ArrayList<String>();
         if (transform != null && transform.getFieldMappings() != null && !transform.getFieldMappings().isEmpty()) {
-            List<String> columns = new ArrayList<String>();
             for (FieldMapping mapping : transform.getFieldMappings()) {
                 if (mapping != null && mapping.getSource() != null) {
                     columns.add(mapping.effectiveTarget());
                 }
             }
-            return columns;
         }
-        return null;
+        if (transform != null && transform.getExpressions() != null) {
+            for (ExpressionSpec expression : transform.getExpressions()) {
+                if (expression != null && expression.getName() != null) {
+                    columns.add(expression.getName());
+                }
+            }
+        }
+        if (transform != null && transform.getScripts() != null) {
+            for (ScriptSpec script : transform.getScripts()) {
+                if (script != null && script.getName() != null) {
+                    columns.add(script.getName());
+                }
+            }
+        }
+        return columns.isEmpty() ? null : columns;
     }
 
-    /** 源侧幂等键列：由目标幂等键列经字段映射反查源列名；查不到就同名假设。 */
+    /** 源侧幂等键列：聚合下推时 = 分组列；否则由目标幂等键列经字段映射反查源列名；查不到就同名假设。 */
     private List<String> sourceKeyColumns(JobDescriptor descriptor) {
+        SourceSpec sourceSpec = descriptor.getSource();
+        if (sourceSpec != null && sourceSpec.getPushdown() != null
+                && sourceSpec.getPushdown().isAggregatePushdown()) {
+            // 聚合下推：源侧「行」是聚合结果行，键列 = 分组列
+            return new ArrayList<String>(sourceSpec.getPushdown().getGroupBy());
+        }
         Map<String, String> targetToSource = new LinkedHashMap<String, String>();
         TransformSpec transform = descriptor.getTransform();
         if (transform != null && transform.getFieldMappings() != null) {
@@ -242,8 +286,8 @@ public class EtlEngine {
         }
         List<String> sourceColumns = new ArrayList<String>();
         for (String key : descriptor.getIdempotencyKey()) {
-            String source = targetToSource.get(key);
-            sourceColumns.add(source == null ? key : source);
+            String sourceColumn = targetToSource.get(key);
+            sourceColumns.add(sourceColumn == null ? key : sourceColumn);
         }
         return sourceColumns;
     }

@@ -20,4 +20,13 @@ public interface RowTransformer {
      * @return 变换后的行（目标列名 → 值）
      */
     Map<String, Object> transform(Map<String, Object> row);
+
+    /**
+     * 步骤名（失败信息用；默认取类名）。
+     *
+     * @return 步骤名
+     */
+    default String stepName() {
+        return getClass().getSimpleName();
+    }
 }

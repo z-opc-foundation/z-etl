@@ -32,6 +32,17 @@ public class SourceSpec {
     /** 单页行数（全量模式为分页游标步长；增量模式为水位过滤后的批大小）。 */
     private int pageSize = 500;
 
+    /** SQL 下推声明（过滤下推 / 聚合下推）；为空表示不下推。 */
+    private PushdownSpec pushdown;
+
+    public PushdownSpec getPushdown() {
+        return pushdown;
+    }
+
+    public void setPushdown(PushdownSpec pushdown) {
+        this.pushdown = pushdown;
+    }
+
     public String getDataSourceRef() {
         return dataSourceRef;
     }

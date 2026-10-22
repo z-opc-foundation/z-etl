@@ -107,25 +107,163 @@ public final class JobDescriptorValidator {
             }
         }
         TransformSpec transform = descriptor.getTransform();
-        if (transform != null && transform.getFieldMappings() != null) {
-            for (FieldMapping mapping : transform.getFieldMappings()) {
-                if (mapping == null || isBlank(mapping.getSource())) {
-                    errors.add("transform.fieldMappings 存在无 source 的映射");
-                    continue;
+        if (transform != null) {
+            if (transform.getFieldMappings() != null) {
+                for (FieldMapping mapping : transform.getFieldMappings()) {
+                    if (mapping == null || isBlank(mapping.getSource())) {
+                        errors.add("transform.fieldMappings 存在无 source 的映射");
+                        continue;
+                    }
+                    if (!Identifiers.isSafe(mapping.getSource())) {
+                        errors.add("transform.fieldMappings 含非法源标识符: " + mapping.getSource());
+                    }
+                    if (!isBlank(mapping.getTarget()) && !Identifiers.isSafe(mapping.getTarget())) {
+                        errors.add("transform.fieldMappings 含非法目标标识符: " + mapping.getTarget());
+                    }
+                    if (!isBlank(mapping.getType()) && TypeNames.isKnown(mapping.getType()) == false) {
+                        errors.add("transform.fieldMappings 含未知类型: " + mapping.getType()
+                                + "（可用: " + TypeNames.supported() + "）");
+                    }
                 }
-                if (!Identifiers.isSafe(mapping.getSource())) {
-                    errors.add("transform.fieldMappings 含非法源标识符: " + mapping.getSource());
-                }
-                if (!isBlank(mapping.getTarget()) && !Identifiers.isSafe(mapping.getTarget())) {
-                    errors.add("transform.fieldMappings 含非法目标标识符: " + mapping.getTarget());
-                }
-                if (!isBlank(mapping.getType()) && TypeNames.isKnown(mapping.getType()) == false) {
-                    errors.add("transform.fieldMappings 含未知类型: " + mapping.getType()
-                            + "（可用: " + TypeNames.supported() + "）");
+            }
+            checkTypeNormalizations(errors, transform.getTypeNormalizations());
+            checkExpressions(errors, transform.getExpressions());
+            checkScripts(errors, transform.getScripts());
+        }
+        checkPushdown(errors, source == null ? null : source.getPushdown());
+        return errors;
+    }
+
+    /** 类型归一规则校验。 */
+    private static void checkTypeNormalizations(List<String> errors, List<TypeNormalizationSpec> specs) {
+        if (specs == null) {
+            return;
+        }
+        for (TypeNormalizationSpec spec : specs) {
+            if (spec == null || isBlank(spec.getColumn())) {
+                errors.add("transform.typeNormalizations 存在无 column 的规则");
+                continue;
+            }
+            if (!Identifiers.isSafe(spec.getColumn())) {
+                errors.add("transform.typeNormalizations 含非法列标识符: " + spec.getColumn());
+            }
+            if (!TypeNames.isKnown(spec.getType())) {
+                errors.add("transform.typeNormalizations 含未知类型: " + spec.getType()
+                        + "（可用: " + TypeNames.supported() + "）");
+            }
+            if (spec.getScale() != null && spec.getScale().intValue() < 0) {
+                errors.add("transform.typeNormalizations 的 scale 不能为负: " + spec.getColumn());
+            }
+        }
+    }
+
+    /** 行级表达式校验（含引擎白名单与不安全引擎的显式拒绝）。 */
+    private static void checkExpressions(List<String> errors, List<ExpressionSpec> specs) {
+        if (specs == null) {
+            return;
+        }
+        for (ExpressionSpec spec : specs) {
+            if (spec == null || isBlank(spec.getName())) {
+                errors.add("transform.expressions 存在无 name 的规则");
+                continue;
+            }
+            if (!Identifiers.isSafe(spec.getName())) {
+                errors.add("transform.expressions 含非法输出列名: " + spec.getName());
+            }
+            if (isBlank(spec.getExpression())) {
+                errors.add("transform.expressions[" + spec.getName() + "] 缺表达式");
+            }
+            String engine = spec.effectiveEngine();
+            if (!ExpressionSpec.ENGINE_EL.equals(engine) && !ExpressionSpec.ENGINE_GROOVY.equals(engine)) {
+                errors.add("transform.expressions[" + spec.getName() + "] 引擎不支持: " + spec.getEngine()
+                        + "（可用: " + ExpressionSpec.ENGINE_EL + " / " + ExpressionSpec.ENGINE_GROOVY
+                        + "；LUA 无沙箱可逃逸、JS 模块无 JS 引擎 ⇒ 硬拒绝）");
+            }
+            if (!isBlank(spec.getType()) && !TypeNames.isKnown(spec.getType())) {
+                errors.add("transform.expressions[" + spec.getName() + "] 含未知类型: " + spec.getType()
+                        + "（可用: " + TypeNames.supported() + "）");
+            }
+        }
+    }
+
+    /** 脚本沙箱步骤校验（含 LUA 的显式拒绝与超时/上限的取值范围）。 */
+    private static void checkScripts(List<String> errors, List<ScriptSpec> specs) {
+        if (specs == null) {
+            return;
+        }
+        for (ScriptSpec spec : specs) {
+            if (spec == null || isBlank(spec.getName())) {
+                errors.add("transform.scripts 存在无 name 的步骤");
+                continue;
+            }
+            if (!Identifiers.isSafe(spec.getName())) {
+                errors.add("transform.scripts 含非法输出列名: " + spec.getName());
+            }
+            if (isBlank(spec.getScript())) {
+                errors.add("transform.scripts[" + spec.getName() + "] 缺脚本文本");
+            }
+            String engine = spec.effectiveEngine();
+            if (!ScriptSpec.ENGINE_GROOVY.equals(engine) && !ScriptSpec.ENGINE_EL.equals(engine)) {
+                errors.add("transform.scripts[" + spec.getName() + "] 引擎不支持: " + spec.getEngine()
+                        + "（可用: " + ScriptSpec.ENGINE_GROOVY + " / " + ScriptSpec.ENGINE_EL
+                        + "；LUA 执行器无沙箱无超时、实测可逃逸 ⇒ 硬拒绝）");
+            }
+            if (spec.getTimeoutMs() != null && spec.getTimeoutMs().longValue() <= 0L) {
+                errors.add("transform.scripts[" + spec.getName() + "] timeoutMs 必须为正数");
+            }
+            if (spec.getMaxOutputChars() != null && spec.getMaxOutputChars().intValue() <= 0) {
+                errors.add("transform.scripts[" + spec.getName() + "] maxOutputChars 必须为正数");
+            }
+            if (!isBlank(spec.getType()) && !TypeNames.isKnown(spec.getType())) {
+                errors.add("transform.scripts[" + spec.getName() + "] 含未知类型: " + spec.getType()
+                        + "（可用: " + TypeNames.supported() + "）");
+            }
+        }
+    }
+
+    /** SQL 下推校验（函数白名单 + 标识符白名单）。 */
+    private static void checkPushdown(List<String> errors, PushdownSpec pushdown) {
+        if (pushdown == null) {
+            return;
+        }
+        if (pushdown.getGroupBy() != null) {
+            for (String column : pushdown.getGroupBy()) {
+                if (!Identifiers.isSafe(column)) {
+                    errors.add("source.pushdown.groupBy 含非法标识符: " + column);
                 }
             }
         }
-        return errors;
+        if (pushdown.getAggregates() != null) {
+            for (AggregateSpec aggregate : pushdown.getAggregates()) {
+                if (aggregate == null) {
+                    errors.add("source.pushdown.aggregates 存在空规则");
+                    continue;
+                }
+                String function = aggregate.effectiveFunction();
+                boolean allowed = false;
+                for (String safe : AggregateSpec.SAFE_FUNCTIONS) {
+                    if (safe.equals(function)) {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed) {
+                    errors.add("source.pushdown.aggregates 聚合函数不支持: " + aggregate.getFunction()
+                            + "（可用: " + String.join("/", AggregateSpec.SAFE_FUNCTIONS) + "）");
+                }
+                String column = aggregate.getColumn();
+                if (isBlank(column)) {
+                    errors.add("source.pushdown.aggregates 缺聚合列");
+                } else if (!"*".equals(column.trim()) && !Identifiers.isSafe(column)) {
+                    errors.add("source.pushdown.aggregates 含非法列标识符: " + column);
+                } else if ("*".equals(column.trim()) && !"COUNT".equals(function)) {
+                    errors.add("source.pushdown.aggregates 只有 COUNT 允许 *，实际: " + function);
+                }
+                if (!Identifiers.isSafe(aggregate.effectiveAlias())) {
+                    errors.add("source.pushdown.aggregates 含非法别名: " + aggregate.effectiveAlias());
+                }
+            }
+        }
     }
 
     private static void checkTable(List<String> errors, String field, String table) {

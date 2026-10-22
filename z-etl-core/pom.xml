@@ -62,6 +62,19 @@
             <version>2.2.224</version>
             <scope>test</scope>
         </dependency>
+        <!-- 零件面：z-util-expr 的 EL 引擎（行级表达式）。
+             只引 EL 一个子模块：六引擎里 JS 模块没有 JS 引擎、LUA 无沙箱可逃逸（TASK-010 实测），
+             本仓对 LUA/JS 硬拒绝 ⇒ 不引 Groovy/Lua/SQL/Obj 子模块，避免把不可用的执行器带进来。 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-util-expr-el</artifactId>
+        </dependency>
+        <!-- 零件面：z-script-engine（脚本沙箱：GroovySandbox / ElSandbox / SandboxExecutor 超时）。
+             行级表达式的 GROOVY 引擎也走这里（z-util-expr 的裸 GroovyExecutor 无沙箱 ⇒ 不启用）。 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-script-engine</artifactId>
+        </dependency>
     </dependencies>
 
 </project>

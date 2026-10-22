@@ -38,37 +38,10 @@ public class FieldMappingTransformer implements RowTransformer {
             Object raw = RowValues.get(row, mapping.getSource());
             Object value = TypeNormalizer.normalize(raw, mapping.getType());
             if (value == null && Boolean.FALSE.equals(mapping.getNullable())) {
-                value = defaultValue(mapping.getType());
+                value = TypeNormalizer.defaultValue(mapping.getType());
             }
             result.put(target, value);
         }
         return result;
-    }
-
-    /** 不可空时的类型默认值。 */
-    private static Object defaultValue(String type) {
-        if (type == null) {
-            return null;
-        }
-        String key = type.trim().toUpperCase();
-        if ("LONG".equals(key)) {
-            return Long.valueOf(0L);
-        }
-        if ("INT".equals(key)) {
-            return Integer.valueOf(0);
-        }
-        if ("STRING".equals(key)) {
-            return "";
-        }
-        if ("BIGDECIMAL".equals(key)) {
-            return java.math.BigDecimal.ZERO;
-        }
-        if ("DOUBLE".equals(key)) {
-            return Double.valueOf(0d);
-        }
-        if ("BOOLEAN".equals(key)) {
-            return Boolean.FALSE;
-        }
-        return null;
     }
 }

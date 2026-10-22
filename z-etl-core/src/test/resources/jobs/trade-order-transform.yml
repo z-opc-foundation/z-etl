@@ -1,0 +1,62 @@
+job:
+  name: trade-order-transform
+  description: "四类转换端到端：字段映射 + SQL pushdown(过滤下推) + 行级表达式(z-util-expr EL / GROOVY 沙箱) + 类型归一"
+  mode: auto
+  source:
+    dataSourceRef: ds-oc-main
+    table: z_trade_order
+    columns: [id, order_no, user_id, amount, status, payment_method, updated_at]
+    watermarkColumn: updated_at
+    pageSize: 200
+    # SQL pushdown：过滤下推 —— status = 1 的明细在源库就滤掉，不回引擎再滤
+    pushdown:
+      filter: "status = 1"
+  transform:
+    # ① 字段映射：id → order_id 改名 + 落库类型
+    fieldMappings:
+      - {source: id,            target: order_id,        type: LONG}
+      - {source: order_no,      target: order_no,        type: STRING}
+      - {source: user_id,       target: user_id,         type: LONG}
+      - {source: amount,        target: amount,          type: BIGDECIMAL}
+      - {source: status,        target: status,          type: INT}
+      - {source: payment_method, target: payment_method, type: STRING}
+      - {source: updated_at,    target: updated_at,      type: TIMESTAMP}
+    # ④ 行级表达式：EL 走 z-util-expr；GROOVY 走 z-script 沙箱（BigDecimal 精确）
+    expressions:
+      - name: status_text
+        engine: EL
+        expression: "status == 1 ? 'PAID' : (status == 2 ? 'SHIPPED' : 'CLOSED')"
+        type: STRING
+      - name: gross_amount
+        engine: GROOVY
+        expression: "amount * 1.13"
+        type: BIGDECIMAL
+      - name: tax_amount
+        engine: GROOVY
+        expression: "gross_amount - amount"
+        type: BIGDECIMAL
+    # 复杂清洗：脚本沙箱（GROOVY 默认）
+    scripts:
+      - name: pay_channel
+        engine: GROOVY
+        timeoutMs: 2000
+        maxOutputChars: 256
+        script: |
+          def raw = payment_method
+          def cleaned = (raw == null ? '' : raw.toString().trim().toUpperCase())
+          cleaned
+    # ③ 类型归一：链尾收口（类型 + 定点小数位）
+    typeNormalizations:
+      - {column: status,       type: LONG}
+      - {column: amount,       type: BIGDECIMAL, scale: 2}
+      - {column: gross_amount, type: BIGDECIMAL, scale: 2}
+      - {column: tax_amount,   type: BIGDECIMAL, scale: 2}
+  target:
+    dataSourceRef: ds-etl-landing
+    table: etl_trade_order_transformed
+    batchSize: 100
+    writeMode: upsert
+  idempotencyKey: [order_id]
+  watermark:
+    column: updated_at
+    type: TIMESTAMP

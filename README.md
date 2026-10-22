@@ -14,8 +14,8 @@ z-etl/
 │   └── src/main/java/com/zifang/z/etl/core/
 │       ├── job/               作业描述模型（JobDescriptor + 解析器 + 校验器）
 │       ├── spi/               DataSourceProvider（数据源解析 SPI，z-dms 落地后由它提供实现）
-│       ├── reader/            取数器（分页游标 + 水位过滤）
-│       ├── transform/         变换链（字段映射 + 类型归一）
+│       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推）
+│       ├── transform/         变换链（字段映射 → 行级表达式 → 脚本沙箱 → 类型归一）
 │       ├── writer/            写出器（批量 upsert + 幂等键）
 │       ├── checkpoint/        水位存储（落库 / 内存两实现）
 │       ├── reconcile/         对账器（行数 + 校验和双口径）
@@ -58,6 +58,49 @@ job:
 
 JSON 形态写成同一份内容即可（`{"job": {...}}` 或直接是描述对象）。
 
+## 转换链（四类算子 + 下推）
+
+链上顺序固定：**字段映射 → 行级表达式 → 脚本沙箱 → 类型归一（链尾收口）**。
+「SQL pushdown」不在链上，它作用在**取数阶段**（源库把活干完，引擎只拿结果）。
+
+| # | 类别 | 声明位置 | 引擎 / 执行器 | 安全口径 |
+|---|---|---|---|---|
+| ① | 字段映射 | `transform.fieldMappings` | 引擎层 | 源列 / 目标列过 `Identifiers` 白名单 |
+| ② | SQL pushdown | `source.pushdown` | 源库 | 过滤下推 + 列裁剪下推 + **聚合下推**（`groupBy` + `aggregates`，函数白名单 `SUM/COUNT/AVG/MIN/MAX`） |
+| ③ | 行级表达式 | `transform.expressions` | `EL`（z-util-expr，默认）/ `GROOVY`（**z-script 沙箱**） | `LUA`/`JS` **硬拒绝**（无沙箱可逃逸 / 无 JS 引擎） |
+| ④ | 类型归一 | `transform.typeNormalizations` | 引擎层 | 类型 + 定点小数位（`scale`）+ 空值策略 |
+| — | 脚本沙箱（复杂清洗） | `transform.scripts` | `GROOVY`（默认）/ `EL`（z-script 沙箱） | 墙钟超时 + 单步产出上限；`LUA` **硬拒绝** |
+
+```yaml
+  source:
+    pushdown:
+      filter: "status = 1"        # 过滤下推
+      groupBy: [status]           # 聚合下推（可选）
+      aggregates:
+        - {function: COUNT, column: "*",   alias: order_cnt}
+        - {function: SUM,   column: amount, alias: total_amount}
+  transform:
+    fieldMappings:
+      - {source: id,     target: order_id, type: LONG}
+    expressions:
+      - {name: status_text, engine: EL,    expression: "status == 1 ? 'PAID' : 'CLOSED'", type: STRING}
+      - {name: gross_amount, engine: GROOVY, expression: "amount * 1.13", type: BIGDECIMAL}
+    scripts:
+      - name: pay_channel
+        engine: GROOVY
+        timeoutMs: 2000
+        maxOutputChars: 65536
+        script: "def raw = payment_method\n(raw == null ? '' : raw.toString().trim().toUpperCase())\n"
+    typeNormalizations:
+      - {column: gross_amount, type: BIGDECIMAL, scale: 2}
+```
+
+> ⚠️ **金额别用 EL**：z-util-expr 的 EL 算术走 double（`100.00*1.13 = 112.99999999999999`），
+> 金额表达式请用 `GROOVY`（BigDecimal 精确，且经 z-script 沙箱），再用类型归一 `scale` 收口。
+>
+> ⚠️ **Groovy 沙箱有 JDK 版本边界**：z-script 用 Groovy 3.0.9，实测 **JDK 8 ✓ / JDK 17 ✓ / JDK 23 ✗**
+> （脚本引用 JDK 类时报 `Unsupported class file major version 67`）⇒ 运行 JDK 需 ≤ 17。
+
 ## 管控 REST
 
 | 方法 | 路径 | 说明 |
@@ -91,10 +134,15 @@ JSON 形态写成同一份内容即可（`{"job": {...}}` 或直接是描述对�
 
 ```bash
 mvn clean install        # 2 个模块，Java 8；发版改根 pom <revision> 一处
-mvn -o test              # 11 个用例（core 10 + web 1）
+mvn -o test              # 24 个用例（core 23 + web 1）
 ```
 
-三项验收的落点与复跑命令见 [`_doc/002_acceptance/001_验收复跑.md`](_doc/002_acceptance/001_验收复跑.md)。
+> ⚠️ **跑测试请用 JDK 8 或 17**：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，
+> 在 JDK 21+ 上会因读不了高版本 class 文件而失败（`Unsupported class file major version 67`）。
+> 例：`JAVA_HOME=$(/usr/libexec/java_home -v 1.8) mvn -o test`。
+
+三项验收的落点与复跑命令见 [`_doc/002_acceptance/001_验收复跑.md`](_doc/002_acceptance/001_验收复跑.md)；
+转换链（D4）三项验收见 [`_doc/002_acceptance/002_验收复跑-转换链.md`](_doc/002_acceptance/002_验收复跑-转换链.md)。
 
 > ⚠️ 验收全部跑在**本地 H2 内存库**上（源库 / 目标库 / 引擎元库三个独立库）：
 > 不连生产 RDS、不在 `oc` 库建表、不对任何真实库写入。
@@ -149,5 +197,5 @@ mvn -o test              # 11 个用例（core 10 + web 1）
 |---|---|---|
 | TASK-20261012-011 / 012 | z-dms 仓骨架与形态 B 管控 | 未落地（本仓用 `DataSourceProvider` SPI 承接） |
 | TASK-20261012-014 | 增量手段：水位轮询 + 持久化断点续传（D3） | 未开始（本仓已有水位骨架，细节待该卡） |
-| TASK-20261012-015 | 转换深度：z-util-expr 行级 + z-script 沙箱（D4） | 未开始（transform 链已留算子挂载点） |
+| TASK-20261012-015 | 转换深度：z-util-expr 行级 + z-script 沙箱（D4） | **已完成（2026-10-22）**：四类转换各一条真实规则端到端跑通 + 沙箱超时/越限拦截 + 重跑幂等；LUA/JS 硬拒绝；沙箱无内存配额与 Groovy 的 JDK 版本边界已记入 `_doc/001_arch/00-overview.md` §6 |
 | TASK-20261012-016 | 与 z-mq / z-lc 的分工成文进两仓 README（D5） | 未开始 |

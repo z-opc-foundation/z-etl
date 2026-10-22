@@ -1,0 +1,74 @@
+{
+  "job": {
+    "name": "trade-order-transform-json",
+    "description": "同一份转换作业的 JSON 形态（与 yml 形态等价）",
+    "mode": "auto",
+    "source": {
+      "dataSourceRef": "ds-oc-main",
+      "table": "z_trade_order",
+      "columns": ["id", "order_no", "user_id", "amount", "status", "payment_method", "updated_at"],
+      "watermarkColumn": "updated_at",
+      "pageSize": 200,
+      "pushdown": {
+        "filter": "status = 1"
+      }
+    },
+    "transform": {
+      "fieldMappings": [
+        {"source": "id", "target": "order_id", "type": "LONG"},
+        {"source": "order_no", "target": "order_no", "type": "STRING"},
+        {"source": "user_id", "target": "user_id", "type": "LONG"},
+        {"source": "amount", "target": "amount", "type": "BIGDECIMAL"},
+        {"source": "status", "target": "status", "type": "INT"},
+        {"source": "payment_method", "target": "payment_method", "type": "STRING"},
+        {"source": "updated_at", "target": "updated_at", "type": "TIMESTAMP"}
+      ],
+      "expressions": [
+        {
+          "name": "status_text",
+          "engine": "EL",
+          "expression": "status == 1 ? 'PAID' : (status == 2 ? 'SHIPPED' : 'CLOSED')",
+          "type": "STRING"
+        },
+        {
+          "name": "gross_amount",
+          "engine": "GROOVY",
+          "expression": "amount * 1.13",
+          "type": "BIGDECIMAL"
+        },
+        {
+          "name": "tax_amount",
+          "engine": "GROOVY",
+          "expression": "gross_amount - amount",
+          "type": "BIGDECIMAL"
+        }
+      ],
+      "scripts": [
+        {
+          "name": "pay_channel",
+          "engine": "GROOVY",
+          "timeoutMs": 2000,
+          "maxOutputChars": 256,
+          "script": "def raw = payment_method\ndef cleaned = (raw == null ? '' : raw.toString().trim().toUpperCase())\ncleaned\n"
+        }
+      ],
+      "typeNormalizations": [
+        {"column": "status", "type": "LONG"},
+        {"column": "amount", "type": "BIGDECIMAL", "scale": 2},
+        {"column": "gross_amount", "type": "BIGDECIMAL", "scale": 2},
+        {"column": "tax_amount", "type": "BIGDECIMAL", "scale": 2}
+      ]
+    },
+    "target": {
+      "dataSourceRef": "ds-etl-landing",
+      "table": "etl_trade_order_transformed",
+      "batchSize": 100,
+      "writeMode": "upsert"
+    },
+    "idempotencyKey": ["order_id"],
+    "watermark": {
+      "column": "updated_at",
+      "type": "TIMESTAMP"
+    }
+  }
+}

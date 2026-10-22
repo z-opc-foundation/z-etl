@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -62,6 +63,29 @@ public final class EtlTestFixtures {
                     + "status INT, "
                     + "updated_at TIMESTAMP)";
 
+    /** 转换链目标表 DDL：字段映射 + 类型归一 + 表达式 + 脚本 四类算子的产物落点。 */
+    public static final String TRANSFORM_TARGET_DDL =
+            "CREATE TABLE IF NOT EXISTS etl_trade_order_transformed ("
+                    + "order_id BIGINT PRIMARY KEY, "
+                    + "order_no VARCHAR(64) NOT NULL, "
+                    + "user_id BIGINT, "
+                    + "amount DECIMAL(18,2), "
+                    + "status BIGINT, "
+                    + "status_text VARCHAR(32), "
+                    + "gross_amount DECIMAL(18,4), "
+                    + "tax_amount DECIMAL(18,4), "
+                    + "payment_method VARCHAR(32), "
+                    + "pay_channel VARCHAR(64), "
+                    + "updated_at TIMESTAMP)";
+
+    /** 聚合下推目标表 DDL：每行 = 一个分组。 */
+    public static final String SUMMARY_TARGET_DDL =
+            "CREATE TABLE IF NOT EXISTS etl_status_summary ("
+                    + "status INT PRIMARY KEY, "
+                    + "order_cnt BIGINT, "
+                    + "total_amount DECIMAL(18,2), "
+                    + "avg_amount DECIMAL(18,4))";
+
     private static final java.util.concurrent.atomic.AtomicInteger UNIQUE =
             new java.util.concurrent.atomic.AtomicInteger();
 
@@ -103,6 +127,13 @@ public final class EtlTestFixtures {
     public void createSchema() throws SQLException {
         execute(source, SOURCE_DDL);
         execute(target, TARGET_DDL);
+    }
+
+    /** 建表：源表 + 转换链目标表 + 聚合下推目标表（+ 引擎元表）。 */
+    public void createTransformSchema() throws SQLException {
+        execute(source, SOURCE_DDL);
+        execute(target, TRANSFORM_TARGET_DDL);
+        execute(target, SUMMARY_TARGET_DDL);
     }
 
     /**
@@ -153,6 +184,82 @@ public final class EtlTestFixtures {
     /** 从作业描述资源文件读描述（JSON 形态）。 */
     public static JobDescriptor loadJsonDescriptor() {
         return JobDescriptorParser.parse(readResource("/jobs/trade-order-to-snapshot.json"));
+    }
+
+    /** 转换链作业描述（yml 形态）。 */
+    public static JobDescriptor loadTransformDescriptor() {
+        return JobDescriptorParser.parse(readResource("/jobs/trade-order-transform.yml"));
+    }
+
+    /** 转换链作业描述（JSON 形态）。 */
+    public static JobDescriptor loadTransformJsonDescriptor() {
+        return JobDescriptorParser.parse(readResource("/jobs/trade-order-transform.json"));
+    }
+
+    /** 聚合下推作业描述。 */
+    public static JobDescriptor loadSummaryDescriptor() {
+        return JobDescriptorParser.parse(readResource("/jobs/trade-order-status-summary.yml"));
+    }
+
+    /**
+     * 整表规范化导出（逐字段一致性比对用）。
+     *
+     * <p>口径：按 {@code orderBy} 列排序，把每行的所有列按「列名=值」拼成一行文本，
+     * 全部行拼成一个字符串 —— 两次跑出来的字符串完全相同 ⟺ 逐字段一致。
+     *
+     * @param dataSource 数据源
+     * @param table      表名
+     * @param orderBy    排序列
+     * @return 规范化文本
+     */
+    public static String dumpTable(DataSource dataSource, String table, String orderBy) throws SQLException {
+        Connection connection = dataSource.getConnection();
+        try {
+            Statement statement = connection.createStatement();
+            try {
+                ResultSet rs = statement.executeQuery("SELECT * FROM " + table + " ORDER BY " + orderBy);
+                try {
+                    ResultSetMetaData meta = rs.getMetaData();
+                    StringBuilder sb = new StringBuilder();
+                    while (rs.next()) {
+                        for (int i = 1; i <= meta.getColumnCount(); i++) {
+                            Object value = rs.getObject(i);
+                            sb.append(meta.getColumnLabel(i).toLowerCase()).append('=')
+                                    .append(value == null ? "<null>" : value.toString()).append(';');
+                        }
+                        sb.append('\n');
+                    }
+                    return sb.toString();
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                statement.close();
+            }
+        } finally {
+            connection.close();
+        }
+    }
+
+    /** 某列的去重值个数（幂等键去重口径）。 */
+    public static long countDistinct(DataSource dataSource, String table, String column) throws SQLException {
+        Connection connection = dataSource.getConnection();
+        try {
+            Statement statement = connection.createStatement();
+            try {
+                ResultSet rs = statement.executeQuery(
+                        "SELECT COUNT(DISTINCT " + column + ") FROM " + table);
+                try {
+                    return rs.next() ? rs.getLong(1) : 0L;
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                statement.close();
+            }
+        } finally {
+            connection.close();
+        }
     }
 
     /** 读 classpath 资源为字符串。 */

@@ -1,5 +1,7 @@
 package com.zifang.z.etl.core.reader;
 
+import com.zifang.z.etl.core.job.AggregateSpec;
+import com.zifang.z.etl.core.job.PushdownSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.util.db.support.Identifiers;
 
@@ -32,6 +34,9 @@ public class JdbcRowReader implements RowReader {
     private final String watermarkColumn;
     private final Object watermarkValue;
     private final String watermarkType;
+
+    /** 最近一次实际执行的 SQL（取证用：证明下推确实进了源库）。 */
+    private volatile String lastExecutedSql;
 
     /**
      * @param dataSource       源数据源
@@ -102,9 +107,13 @@ public class JdbcRowReader implements RowReader {
 
     /** 取一页（物化，内存上限 = pageSize）。 */
     private List<Map<String, Object>> fetchPage(Connection connection, int pageNo, int pageSize) throws SQLException {
-        StringBuilder sql = new StringBuilder("SELECT ").append(columnList()).append(" FROM ").append(tableRef());
+        StringBuilder sql = new StringBuilder("SELECT ").append(selectList()).append(" FROM ").append(tableRef());
         List<Object> params = new ArrayList<Object>();
         appendWhere(sql, params);
+        String groupBy = groupByClause();
+        if (groupBy != null) {
+            sql.append(" GROUP BY ").append(groupBy);
+        }
         String order = effectiveOrderBy();
         if (order != null) {
             sql.append(" ORDER BY ").append(order);
@@ -112,6 +121,7 @@ public class JdbcRowReader implements RowReader {
         sql.append(" LIMIT ? OFFSET ?");
         params.add(Integer.valueOf(pageSize));
         params.add(Integer.valueOf(pageNo * pageSize));
+        lastExecutedSql = sql.toString();
 
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         PreparedStatement statement = connection.prepareStatement(sql.toString());
@@ -143,11 +153,15 @@ public class JdbcRowReader implements RowReader {
         return rows;
     }
 
-    /** where 拼装：静态条件 + 水位条件。 */
+    /** where 拼装：静态条件 + 下推过滤 + 水位条件。 */
     private void appendWhere(StringBuilder sql, List<Object> params) {
         List<String> conditions = new ArrayList<String>();
         if (spec.getWhere() != null && !spec.getWhere().trim().isEmpty()) {
             conditions.add("(" + spec.getWhere().trim() + ")");
+        }
+        PushdownSpec pushdown = spec.getPushdown();
+        if (pushdown != null && pushdown.hasFilter()) {
+            conditions.add("(" + pushdown.getFilter().trim() + ")");
         }
         if (watermarkColumn != null && !watermarkColumn.trim().isEmpty() && watermarkValue != null) {
             conditions.add(Identifiers.require(watermarkColumn) + " > ?");
@@ -191,6 +205,55 @@ public class JdbcRowReader implements RowReader {
         return String.join(", ", safe);
     }
 
+    /**
+     * 投影清单：**下推口径**。
+     *
+     * <ul>
+     *   <li>聚合下推（{@code groupBy} / {@code aggregates}）：分组列 + 聚合表达式（带别名），
+     *       聚合在源库算完，引擎只拿聚合结果行。</li>
+     *   <li>否则用作业声明的列（列裁剪下推）；未声明则 {@code *}。</li>
+     * </ul>
+     */
+    private String selectList() {
+        PushdownSpec pushdown = spec.getPushdown();
+        if (pushdown == null || !pushdown.isAggregatePushdown()) {
+            return columnList();
+        }
+        List<String> parts = new ArrayList<String>();
+        for (String column : pushdown.getGroupBy()) {
+            parts.add(Identifiers.require(column));
+        }
+        for (AggregateSpec aggregate : pushdown.getAggregates()) {
+            parts.add(aggregateExpression(aggregate) + " AS " + Identifiers.require(aggregate.effectiveAlias()));
+        }
+        return String.join(", ", parts);
+    }
+
+    /**
+     * 聚合表达式：函数名白名单 + 列名标识符白名单（自由 SQL 文本一律不接受）。
+     */
+    private String aggregateExpression(AggregateSpec aggregate) {
+        String function = aggregate.effectiveFunction();
+        String column = aggregate.getColumn() == null ? "" : aggregate.getColumn().trim();
+        if ("*".equals(column)) {
+            return function + "(*)";
+        }
+        return function + "(" + Identifiers.require(column) + ")";
+    }
+
+    /** {@code GROUP BY} 子句；无分组列时返回 {@code null}。 */
+    private String groupByClause() {
+        PushdownSpec pushdown = spec.getPushdown();
+        if (pushdown == null || pushdown.getGroupBy() == null || pushdown.getGroupBy().isEmpty()) {
+            return null;
+        }
+        List<String> safe = new ArrayList<String>();
+        for (String column : pushdown.getGroupBy()) {
+            safe.add(Identifiers.require(column));
+        }
+        return String.join(", ", safe);
+    }
+
     /** 表引用（schema.table 两段，段内白名单）。 */
     private String tableRef() {
         String[] parts = Identifiers.parts(spec.getTable());
@@ -205,13 +268,17 @@ public class JdbcRowReader implements RowReader {
     }
 
     /**
-     * 有效排序列：显式 orderBy → 水位列 → 首列。
+     * 有效排序列：显式 orderBy → 聚合下推的分组列 → 水位列 → 首列。
      *
      * <p>分页必须配稳定排序，否则翻页期间源表变动会漏行/重行。
      */
     private String effectiveOrderBy() {
         if (spec.getOrderBy() != null && !spec.getOrderBy().trim().isEmpty()) {
             return Identifiers.require(spec.getOrderBy().trim());
+        }
+        PushdownSpec pushdown = spec.getPushdown();
+        if (pushdown != null && pushdown.getGroupBy() != null && !pushdown.getGroupBy().isEmpty()) {
+            return Identifiers.require(pushdown.getGroupBy().get(0));
         }
         if (watermarkColumn != null && !watermarkColumn.trim().isEmpty()) {
             return Identifiers.require(watermarkColumn.trim());
@@ -221,6 +288,11 @@ public class JdbcRowReader implements RowReader {
             return Identifiers.require(columns.get(0));
         }
         return null;
+    }
+
+    /** 最近一次实际执行的 SQL（取证用）。 */
+    public String lastExecutedSql() {
+        return lastExecutedSql;
     }
 
     private void close(Connection connection) {

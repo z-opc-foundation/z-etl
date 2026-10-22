@@ -66,6 +66,56 @@ public final class TypeNormalizer {
         return value;
     }
 
+    /**
+     * 类型归一 + 空值策略（不可空时 null 落类型默认值）。
+     *
+     * <p>表达式/脚本/归一三类算子共用这条口径，避免各家自己一套空值语义。
+     *
+     * @param value    原值（可空）
+     * @param type     目标类型；为空表示原样透传
+     * @param nullable 空值策略；{@code false} 时 null 落类型默认值
+     * @return 归一后的值
+     */
+    public static Object coerce(Object value, String type, Boolean nullable) {
+        Object result = normalize(value, type);
+        if (result == null && Boolean.FALSE.equals(nullable)) {
+            result = defaultValue(type);
+        }
+        return result;
+    }
+
+    /**
+     * 不可空时的类型默认值。
+     *
+     * @param type 类型名；为空则返回 {@code null}
+     * @return 类型默认值
+     */
+    public static Object defaultValue(String type) {
+        if (type == null) {
+            return null;
+        }
+        String key = type.trim().toUpperCase();
+        if (TypeNames.LONG.equals(key)) {
+            return Long.valueOf(0L);
+        }
+        if (TypeNames.INT.equals(key)) {
+            return Integer.valueOf(0);
+        }
+        if (TypeNames.STRING.equals(key)) {
+            return "";
+        }
+        if (TypeNames.BIGDECIMAL.equals(key)) {
+            return java.math.BigDecimal.ZERO;
+        }
+        if (TypeNames.DOUBLE.equals(key)) {
+            return Double.valueOf(0d);
+        }
+        if (TypeNames.BOOLEAN.equals(key)) {
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
     /** 字符串化：日期/时间戳落 ISO 文本，BigDecimal 保留精度（不用 double 兜）。 */
     public static String toStringValue(Object value) {
         if (value == null) {

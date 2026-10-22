@@ -1,0 +1,32 @@
+job:
+  name: trade-order-status-summary
+  description: "SQL pushdown 的聚合下推：GROUP BY + 聚合在源库算完，引擎只拿聚合结果行"
+  mode: auto
+  source:
+    dataSourceRef: ds-oc-main
+    table: z_trade_order
+    pushdown:
+      groupBy: [status]
+      aggregates:
+        - {function: COUNT, column: "*",   alias: order_cnt}
+        - {function: SUM,   column: amount, alias: total_amount}
+  transform:
+    fieldMappings:
+      - {source: status,      target: status,      type: INT}
+      - {source: order_cnt,   target: order_cnt,   type: LONG}
+      - {source: total_amount, target: total_amount, type: BIGDECIMAL}
+    expressions:
+      - name: avg_amount
+        engine: EL
+        expression: "total_amount / order_cnt"
+        type: BIGDECIMAL
+    typeNormalizations:
+      - {column: order_cnt,    type: LONG}
+      - {column: total_amount, type: BIGDECIMAL, scale: 2}
+      - {column: avg_amount,   type: BIGDECIMAL, scale: 2}
+  target:
+    dataSourceRef: ds-etl-landing
+    table: etl_status_summary
+    batchSize: 50
+    writeMode: upsert
+  idempotencyKey: [status]

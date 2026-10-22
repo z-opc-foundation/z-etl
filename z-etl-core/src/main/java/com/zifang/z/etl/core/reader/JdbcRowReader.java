@@ -34,6 +34,12 @@ public class JdbcRowReader implements RowReader {
     private final String watermarkColumn;
     private final Object watermarkValue;
     private final String watermarkType;
+    /** 平局列（同秒多多的第二键；可空 ⇒ 单键游标）。 */
+    private final String tiebreakColumn;
+    /** 平局列的当前值（复合游标的第二键）。 */
+    private final Object tiebreakValue;
+    /** 回溯窗口（>0 ⇒ 用「水位值 − 窗口」的闭区间下界，兜时钟回拨 / 迟到数据）。 */
+    private final long overlap;
 
     /** 最近一次实际执行的 SQL（取证用：证明下推确实进了源库）。 */
     private volatile String lastExecutedSql;
@@ -47,15 +53,64 @@ public class JdbcRowReader implements RowReader {
      */
     public JdbcRowReader(DataSource dataSource, SourceSpec spec, String watermarkColumn,
                          Object watermarkValue, String watermarkType) {
+        this(dataSource, spec, watermarkColumn, watermarkValue, watermarkType, null, null, 0L);
+    }
+
+    /**
+     * 复合游标版构造器。
+     *
+     * @param dataSource      源数据源
+     * @param spec            源定义
+     * @param watermarkColumn 水位列（增量模式用；全量模式传 null）
+     * @param watermarkValue 水位值（增量模式用；全量模式传 null）
+     * @param watermarkType  水位类型（LONG / TIMESTAMP）
+     * @param tiebreakColumn 平局列（同秒多多的第二键；可空）
+     * @param tiebreakValue  平局列当前值（可空）
+     * @param overlap        回溯窗口（0 = 关闭）
+     */
+    public JdbcRowReader(DataSource dataSource, SourceSpec spec, String watermarkColumn,
+                         Object watermarkValue, String watermarkType,
+                         String tiebreakColumn, Object tiebreakValue, long overlap) {
         this.dataSource = dataSource;
         this.spec = spec;
         this.watermarkColumn = watermarkColumn;
         this.watermarkValue = watermarkValue;
         this.watermarkType = watermarkType;
+        this.tiebreakColumn = (tiebreakColumn == null || tiebreakColumn.trim().isEmpty())
+                ? null : tiebreakColumn.trim();
+        this.tiebreakValue = tiebreakValue;
+        this.overlap = Math.max(0L, overlap);
     }
 
     @Override
     public long read(RowConsumer consumer) throws Exception {
+        final long[] total = new long[]{0L};
+        readPages(new PageHandler() {
+            @Override
+            public void handle(List<Map<String, Object>> page) throws Exception {
+                for (Map<String, Object> row : page) {
+                    consumer.accept(row);
+                    total[0]++;
+                }
+            }
+        });
+        return total[0];
+    }
+
+    /**
+     * 按**页**读出（页级断点续传的口子）。
+     *
+     * <p>一页交给回调一次 ⇒ 调用方可以在「本页写成功」之后推进水位（checkpoint），
+     * 进程被 kill / 崩掉时水位停在上一个成功页 ⇒ 重启从断点继续，而不是从头再来。
+     *
+     * <p>分页口径与 {@link #read(RowConsumer)} 完全一致：同一条 where、同一个排序，
+     * 本次读取期间过滤条件固定（不随水位推进而变），所以翻页不会漏行。
+     *
+     * @param handler 页处理器
+     * @return 读出的行数
+     * @throws Exception 读取失败
+     */
+    public long readPages(PageHandler handler) throws Exception {
         long total = 0L;
         Connection connection = dataSource.getConnection();
         try {
@@ -66,10 +121,8 @@ public class JdbcRowReader implements RowReader {
                 if (page.isEmpty()) {
                     break;
                 }
-                for (Map<String, Object> row : page) {
-                    consumer.accept(row);
-                    total++;
-                }
+                handler.handle(page);
+                total += page.size();
                 if (page.size() < pageSize) {
                     break;
                 }
@@ -164,8 +217,24 @@ public class JdbcRowReader implements RowReader {
             conditions.add("(" + pushdown.getFilter().trim() + ")");
         }
         if (watermarkColumn != null && !watermarkColumn.trim().isEmpty() && watermarkValue != null) {
-            conditions.add(Identifiers.require(watermarkColumn) + " > ?");
-            params.add(normalizeWatermark(watermarkValue));
+            String w = Identifiers.require(watermarkColumn);
+            if (overlap > 0L) {
+                // 回溯窗口口径：下界 = 水位值 − 窗口（闭区间 >=），窗口内的行会被重读（目标侧 upsert 幂等）
+                conditions.add(w + " >= ?");
+                params.add(overlapThreshold());
+            } else if (tiebreakColumn != null && !tiebreakColumn.trim().isEmpty() && tiebreakValue != null) {
+                // 复合游标口径：(水位值 > ?) OR (水位值 = ? AND 平局列 > ?)
+                // —— 同秒多条不会漏：时间戳等于水位的行靠平局列（自增 id）接力。
+                String tb = Identifiers.require(tiebreakColumn);
+                Object normalized = normalizeWatermark(watermarkValue);
+                conditions.add("(" + w + " > ? OR (" + w + " = ? AND " + tb + " > ?))");
+                params.add(normalized);
+                params.add(normalized);
+                params.add(normalizeTiebreak(tiebreakValue));
+            } else {
+                conditions.add(w + " > ?");
+                params.add(normalizeWatermark(watermarkValue));
+            }
         }
         if (!conditions.isEmpty()) {
             sql.append(" WHERE ").append(String.join(" AND ", conditions));
@@ -184,6 +253,27 @@ public class JdbcRowReader implements RowReader {
             return ((Number) value).longValue();
         }
         return Long.valueOf(String.valueOf(value));
+    }
+
+    /** 平局列值归一（能当数字就当数字，否则按字符串）。 */
+    private Object normalizeTiebreak(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.valueOf(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return String.valueOf(value);
+        }
+    }
+
+    /** 回溯窗口的下界：水位值 − 窗口（TIMESTAMP 单位秒；LONG 单位行数）。 */
+    private Object overlapThreshold() {
+        Object normalized = normalizeWatermark(watermarkValue);
+        if (normalized instanceof Timestamp) {
+            return new Timestamp(((Timestamp) normalized).getTime() - overlap * 1000L);
+        }
+        return Long.valueOf(((Number) normalized).longValue() - overlap);
     }
 
     private void bind(PreparedStatement statement, List<Object> params) throws SQLException {
@@ -281,7 +371,12 @@ public class JdbcRowReader implements RowReader {
             return Identifiers.require(pushdown.getGroupBy().get(0));
         }
         if (watermarkColumn != null && !watermarkColumn.trim().isEmpty()) {
-            return Identifiers.require(watermarkColumn.trim());
+            String order = Identifiers.require(watermarkColumn.trim());
+            if (tiebreakColumn != null && !tiebreakColumn.trim().isEmpty() && overlap <= 0L) {
+                // 复合游标：水位列 + 平局列 一起排序 ⇒ 排序键唯一 ⇒ 翻页稳定不漏行
+                order = order + ", " + Identifiers.require(tiebreakColumn.trim());
+            }
+            return order;
         }
         List<String> columns = spec.getColumns();
         if (columns != null && !columns.isEmpty()) {

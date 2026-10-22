@@ -2,22 +2,25 @@ package com.zifang.z.etl.core.engine;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
+import com.zifang.z.etl.core.checkpoint.WatermarkCursor;
 import com.zifang.z.etl.core.job.ExpressionSpec;
 import com.zifang.z.etl.core.job.FieldMapping;
 import com.zifang.z.etl.core.job.JobDescriptor;
 import com.zifang.z.etl.core.job.JobDescriptorValidator;
 import com.zifang.z.etl.core.job.JobMode;
+import com.zifang.z.etl.core.job.PushdownSpec;
 import com.zifang.z.etl.core.job.ScriptSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.job.TargetSpec;
 import com.zifang.z.etl.core.job.TransformSpec;
 import com.zifang.z.etl.core.reader.JdbcRowReader;
+import com.zifang.z.etl.core.reader.PageHandler;
 import com.zifang.z.etl.core.reader.RowConsumer;
 import com.zifang.z.etl.core.reconcile.ReconciliationReport;
 import com.zifang.z.etl.core.reconcile.Reconciler;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
-import com.zifang.z.etl.core.transform.ExpressionTransformer;
 import com.zifang.z.etl.core.transform.FieldMappingTransformer;
+import com.zifang.z.etl.core.transform.ExpressionTransformer;
 import com.zifang.z.etl.core.transform.RowTransformer;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.transform.ScriptTransformer;
@@ -25,8 +28,13 @@ import com.zifang.z.etl.core.transform.TransformChain;
 import com.zifang.z.etl.core.transform.TypeNormalizationTransformer;
 import com.zifang.z.etl.core.util.RowValues;
 import com.zifang.z.etl.core.writer.JdbcUpsertWriter;
+import com.zifang.util.db.support.Identifiers;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -106,16 +114,52 @@ public class EtlEngine {
 
         boolean incremental = decideIncremental(descriptor, checkpoint, watermarkColumn, result);
 
+        // —— 水位游标解析（复合游标 = 水位值 + 平局列值；回溯窗口；越界策略）——
+        String tiebreakColumn = resolveTiebreakColumn(descriptor);
+        long overlap = resolveOverlap(descriptor);
+        String onOutOfRange = resolveOnOutOfRange(descriptor);
+        String tiebreakBefore = checkpoint == null ? null : checkpoint.getTiebreakValue();
+
         DataSource sourceDs = dataSourceProvider.resolve(sourceSpec.getDataSourceRef());
         DataSource targetDs = dataSourceProvider.resolve(targetSpec.getDataSourceRef());
 
-        final Object[] maxWatermark = new Object[]{null};
+        // —— 越界检测（只在增量模式、且已有水位时才有意义）——
+        if (incremental && watermarkColumn != null && watermarkBefore != null
+                && !isAggregatePushdown(sourceSpec)) {
+            SourceWatermarkStats stats = sourceWatermarkStats(sourceDs, sourceSpec, watermarkColumn,
+                    watermarkBefore, watermarkType);
+            if (stats.isOutOfRange()) {
+                result.setWatermarkOutOfRange(true);
+                if ("RESET".equals(onOutOfRange)) {
+                    checkpointStore.clear(descriptor.getName());
+                    incremental = false;
+                    watermarkBefore = null;
+                    tiebreakBefore = null;
+                    result.addNote("游标越界（源表当前最大水位 " + stats.getMaxValue() + " 早于已存水位 "
+                            + checkpoint.getWatermarkValue() + "）：按 onOutOfRange=RESET 清掉水位，本轮退回全量重跑");
+                } else {
+                    throw new IllegalStateException("作业 " + descriptor.getName() + " 游标越界：源表当前最大水位 "
+                            + stats.getMaxValue() + " 早于已存水位 " + watermarkBefore
+                            + "（源表可能被清空 / 重建）。按 onOutOfRange=FAIL 口径**不推进水位**；"
+                            + "确认后可清掉水位重跑，或把 watermark.onOutOfRange 改成 RESET");
+                }
+            }
+        }
+
+        String runMode = incremental ? "incremental" : "init";
+        result.setMode(runMode);
+        final String loopMode = runMode;
+
+        final WatermarkCursor[] cursor = new WatermarkCursor[]{null};
         final long[] read = new long[]{0L};
 
         JdbcRowReader reader = new JdbcRowReader(sourceDs, sourceSpec,
                 incremental ? watermarkColumn : null,
                 incremental ? watermarkBefore : null,
-                watermarkType);
+                watermarkType,
+                incremental ? tiebreakColumn : null,
+                incremental ? tiebreakBefore : null,
+                incremental ? overlap : 0L);
 
         TransformChain chain;
         ScriptSandbox sandbox = new ScriptSandbox();
@@ -130,16 +174,23 @@ public class EtlEngine {
                 targetColumns(descriptor, targetSpec));
 
         try {
-            read[0] = reader.read(new RowConsumer() {
+            // 页级搬运：读一页 → 写一页 → **提交成功才推进水位** ⇒ 崩在中途水位停在上一个成功页
+            read[0] = reader.readPages(new PageHandler() {
                 @Override
-                public void accept(Map<String, Object> row) throws Exception {
-                    Map<String, Object> transformed = chain.transform(row);
-                    writer.write(transformed);
-                    if (watermarkColumn != null) {
-                        Object value = RowValues.get(row, watermarkColumn);
-                        if (value != null && isNewerWatermark(value, maxWatermark[0], watermarkType)) {
-                            maxWatermark[0] = value;
+                public void handle(List<Map<String, Object>> page) throws Exception {
+                    for (Map<String, Object> row : page) {
+                        Map<String, Object> transformed = chain.transform(row);
+                        writer.write(transformed);
+                        WatermarkCursor rowCursor = cursorOf(row, watermarkColumn, tiebreakColumn, watermarkType);
+                        if (rowCursor != null && (cursor[0] == null || rowCursor.isAfter(cursor[0]))) {
+                            cursor[0] = rowCursor;
                         }
+                    }
+                    writer.flush();
+                    if (cursor[0] != null && watermarkColumn != null) {
+                        saveCheckpoint(descriptor.getName(), watermarkColumn, watermarkType,
+                                tiebreakColumn, cursor[0], loopMode);
+                        result.setCheckpointAdvances(result.getCheckpointAdvances() + 1);
                     }
                 }
             });
@@ -154,14 +205,19 @@ public class EtlEngine {
         result.setRowsRead(read[0]);
         result.setRowsWritten(writer.written());
         result.setWatermarkBefore(watermarkBefore);
-        result.setMode(incremental ? "incremental" : "init");
+        result.setMode(loopMode);
 
         // 水位落库：全量首跑也落 ⇒ 下次自动切增量；增量跑完推进位点
         if (watermarkColumn != null) {
-            String watermarkAfter = maxWatermark[0] == null ? watermarkBefore : watermarkValue(maxWatermark[0], watermarkType);
+            WatermarkCursor after = cursor[0];
+            String watermarkAfter = after == null ? watermarkBefore : after.getValue();
             result.setWatermarkAfter(watermarkAfter);
-            checkpointStore.save(new Checkpoint(descriptor.getName(), watermarkColumn, watermarkType,
-                    watermarkAfter, result.getMode(), System.currentTimeMillis()));
+            result.setWatermarkTiebreakAfter(after == null ? tiebreakBefore : after.getTiebreakValue());
+            if (after != null) {
+                saveCheckpoint(descriptor.getName(), watermarkColumn, watermarkType, tiebreakColumn, after, loopMode);
+            } else {
+                result.addNote("本轮没有读到带水位值的行，水位保持不变");
+            }
         } else {
             result.setWatermarkAfter(watermarkBefore);
             result.addNote("该作业未声明水位列，只能全量跑");
@@ -177,6 +233,22 @@ public class EtlEngine {
         }
         result.setReport(report);
         result.setReconciled(report.matched());
+
+        // —— 时钟回拨 / 迟到数据：源目标行数有落差 ⇒ 报「没搬过去的行数」+ 游标之前压着的行数 ——
+        if (!report.isCountMatched() && watermarkColumn != null && watermarkBefore != null
+                && !isAggregatePushdown(sourceSpec)) {
+            long shortfall = report.getSourceCount() - report.getTargetCount();
+            if (shortfall > 0L) {
+                long behindCursor = countRowsBehindCursor(sourceDs, sourceSpec, watermarkColumn,
+                        watermarkBefore, watermarkType);
+                result.setStaleRows(shortfall);
+                result.addNote("源/目标差 " + shortfall + " 行未搬过去，且源侧有 " + behindCursor
+                        + " 行的水位早于当前游标（疑似时钟回拨 / 迟到数据）："
+                        + "纯时间游标搬不到游标之前的行；配 watermark.overlap（回溯窗口）可兜住，"
+                        + "或改用自增 id 游标");
+            }
+        }
+
         result.setFinishedAt(System.currentTimeMillis());
 
         if (jobRepository != null) {
@@ -269,11 +341,10 @@ public class EtlEngine {
 
     /** 源侧幂等键列：聚合下推时 = 分组列；否则由目标幂等键列经字段映射反查源列名；查不到就同名假设。 */
     private List<String> sourceKeyColumns(JobDescriptor descriptor) {
-        SourceSpec sourceSpec = descriptor.getSource();
-        if (sourceSpec != null && sourceSpec.getPushdown() != null
-                && sourceSpec.getPushdown().isAggregatePushdown()) {
+        SourceSpec source = descriptor.getSource();
+        if (source != null && source.getPushdown() != null && source.getPushdown().isAggregatePushdown()) {
             // 聚合下推：源侧「行」是聚合结果行，键列 = 分组列
-            return new ArrayList<String>(sourceSpec.getPushdown().getGroupBy());
+            return new ArrayList<String>(source.getPushdown().getGroupBy());
         }
         Map<String, String> targetToSource = new LinkedHashMap<String, String>();
         TransformSpec transform = descriptor.getTransform();
@@ -312,6 +383,171 @@ public class EtlEngine {
             return descriptor.getWatermark().getType().trim().toUpperCase();
         }
         return "LONG";
+    }
+
+    /** 平局列（同秒多多的第二键）；未声明则单键游标。 */
+    private String resolveTiebreakColumn(JobDescriptor descriptor) {
+        if (descriptor.getWatermark() != null
+                && descriptor.getWatermark().getTiebreakColumn() != null
+                && !descriptor.getWatermark().getTiebreakColumn().trim().isEmpty()) {
+            return descriptor.getWatermark().getTiebreakColumn().trim();
+        }
+        return null;
+    }
+
+    /** 回溯窗口（0 = 关闭）。 */
+    private long resolveOverlap(JobDescriptor descriptor) {
+        if (descriptor.getWatermark() != null) {
+            return Math.max(0L, descriptor.getWatermark().getOverlap());
+        }
+        return 0L;
+    }
+
+    /** 游标越界策略（FAIL / RESET）。 */
+    private String resolveOnOutOfRange(JobDescriptor descriptor) {
+        if (descriptor.getWatermark() != null) {
+            return descriptor.getWatermark().effectiveOnOutOfRange();
+        }
+        return "FAIL";
+    }
+
+    /** 行 → 游标（水位值 + 平局列值）；水位列为空时返回 null。 */
+    private WatermarkCursor cursorOf(Map<String, Object> row, String watermarkColumn,
+                                     String tiebreakColumn, String watermarkType) {
+        if (watermarkColumn == null) {
+            return null;
+        }
+        Object value = RowValues.get(row, watermarkColumn);
+        if (value == null) {
+            return null;
+        }
+        Object tiebreak = tiebreakColumn == null ? null : RowValues.get(row, tiebreakColumn);
+        return WatermarkCursor.of(watermarkColumn, watermarkType, value, tiebreakColumn, tiebreak);
+    }
+
+    /** 落水位（复合游标：水位值 + 平局列值 + 上次推进时间）。 */
+    private void saveCheckpoint(String jobName, String watermarkColumn, String watermarkType,
+                                String tiebreakColumn, WatermarkCursor cursor, String mode) {
+        checkpointStore.save(new Checkpoint(jobName, watermarkColumn, watermarkType,
+                cursor == null ? null : cursor.getValue(),
+                tiebreakColumn, cursor == null ? null : cursor.getTiebreakValue(),
+                mode, System.currentTimeMillis()));
+    }
+
+    /**
+     * 源侧水位统计：当前最大水位 + 早于游标的滞留行数（时钟回拨 / 迟到数据的量）。
+     *
+     * <p>口径与对账一致：按作业的过滤口径（静态 where + 下推过滤）统计。
+     */
+    private SourceWatermarkStats sourceWatermarkStats(DataSource sourceDs, SourceSpec sourceSpec,
+                                                      String watermarkColumn, String watermarkValue,
+                                                      String watermarkType) {
+        SourceWatermarkStats stats = new SourceWatermarkStats();
+        String column = Identifiers.require(watermarkColumn);
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total, MAX(").append(column)
+                .append(") AS max_value FROM ").append(tableRef(sourceSpec.getTable()));
+        String where = sourceWhere(sourceSpec);
+        if (where != null) {
+            sql.append(" WHERE ").append(where);
+        }
+        Connection connection = null;
+        PreparedStatement statement = null;
+        ResultSet rs = null;
+        try {
+            connection = sourceDs.getConnection();
+            statement = connection.prepareStatement(sql.toString());
+            rs = statement.executeQuery();
+            if (rs.next()) {
+                stats.setTotal(rs.getLong("total"));
+                Object max = rs.getObject("max_value");
+                stats.setMaxValue(max == null ? null : WatermarkCursor.format(max, watermarkType));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("统计源侧水位失败: " + e.getMessage(), e);
+        } finally {
+            closeQuietly(rs);
+            closeQuietly(statement);
+            closeQuietly(connection);
+        }
+        return stats;
+    }
+
+    /**
+     * 统计「水位早于当前游标」的行数（游标已经越过、不会再被扫到的行）。
+     *
+     * <p>这是**时钟回拨 / 迟到数据**的辅助信号：源库时钟往回拨 ⇒ 新写的行时间戳早于游标 ⇒
+     * 纯时间游标永远扫不到它们。注意：源与目标是两个库，**跨库没法做反连接**，
+     * 所以「没搬过去的行数」用源/目标行数差额口径（见 run 里的落差判定），
+     * 这里只给出「游标之前还压着多少行」这个上下文数。
+     *
+     * @return 游标之前的行数
+     */
+    private long countRowsBehindCursor(DataSource sourceDs, SourceSpec sourceSpec,
+                                       String watermarkColumn, String watermarkValue, String watermarkType) {
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM ").append(tableRef(sourceSpec.getTable()))
+                .append(" WHERE ").append(Identifiers.require(watermarkColumn)).append(" < ?");
+        String where = sourceWhere(sourceSpec);
+        if (where != null) {
+            sql.append(" AND (").append(where).append(")");
+        }
+        Connection connection = null;
+        PreparedStatement statement = null;
+        ResultSet rs = null;
+        try {
+            connection = sourceDs.getConnection();
+            statement = connection.prepareStatement(sql.toString());
+            statement.setObject(1, WatermarkCursor.normalize(watermarkValue, watermarkType));
+            rs = statement.executeQuery();
+            return rs.next() ? rs.getLong(1) : 0L;
+        } catch (SQLException e) {
+            throw new IllegalStateException("统计游标之前的行数失败: " + e.getMessage(), e);
+        } finally {
+            closeQuietly(rs);
+            closeQuietly(statement);
+            closeQuietly(connection);
+        }
+    }
+
+    /** 源侧过滤口径（静态 where + 下推过滤），与对账口径一致。 */
+    private String sourceWhere(SourceSpec sourceSpec) {
+        List<String> parts = new ArrayList<String>();
+        if (sourceSpec.getWhere() != null && !sourceSpec.getWhere().trim().isEmpty()) {
+            parts.add("(" + sourceSpec.getWhere().trim() + ")");
+        }
+        PushdownSpec pushdown = sourceSpec.getPushdown();
+        if (pushdown != null && pushdown.hasFilter()) {
+            parts.add("(" + pushdown.getFilter().trim() + ")");
+        }
+        return parts.isEmpty() ? null : String.join(" AND ", parts);
+    }
+
+    /** 聚合下推时源侧「行」是聚合结果行，逐行水位口径不适用 ⇒ 跳过越界/回拨检测。 */
+    private boolean isAggregatePushdown(SourceSpec sourceSpec) {
+        PushdownSpec pushdown = sourceSpec.getPushdown();
+        return pushdown != null && pushdown.isAggregatePushdown();
+    }
+
+    /** 表引用（schema.table 两段，段内白名单）。 */
+    private String tableRef(String table) {
+        String[] parts = Identifiers.parts(table);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                sb.append('.');
+            }
+            sb.append(parts[i]);
+        }
+        return sb.toString();
+    }
+
+    private void closeQuietly(AutoCloseable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (Exception ignore) {
+                // 关闭异常不影响主流程
+            }
+        }
     }
 
     /** 水位比较：LONG 比数值，TIMESTAMP 比时间。 */

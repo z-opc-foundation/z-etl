@@ -13,6 +13,10 @@ public class Checkpoint {
     private String watermarkColumn;
     private String watermarkType;
     private String watermarkValue;
+    /** 平局列（同秒多条的第二键；可空 ⇒ 单键游标）。 */
+    private String tiebreakColumn;
+    /** 平局列的当前值（与 {@link #watermarkValue} 一起构成复合游标）。 */
+    private String tiebreakValue;
     private String lastMode;
     private long lastRunAt;
 
@@ -27,6 +31,13 @@ public class Checkpoint {
         this.watermarkValue = watermarkValue;
         this.lastMode = lastMode;
         this.lastRunAt = lastRunAt;
+    }
+
+    public Checkpoint(String jobName, String watermarkColumn, String watermarkType, String watermarkValue,
+                      String tiebreakColumn, String tiebreakValue, String lastMode, long lastRunAt) {
+        this(jobName, watermarkColumn, watermarkType, watermarkValue, lastMode, lastRunAt);
+        this.tiebreakColumn = tiebreakColumn;
+        this.tiebreakValue = tiebreakValue;
     }
 
     public String getJobName() {
@@ -59,6 +70,24 @@ public class Checkpoint {
 
     public void setWatermarkValue(String watermarkValue) {
         this.watermarkValue = watermarkValue;
+    }
+
+    /** 平局列（同秒多条的第二键；可空 ⇒ 单键游标）。 */
+    public String getTiebreakColumn() {
+        return tiebreakColumn;
+    }
+
+    public void setTiebreakColumn(String tiebreakColumn) {
+        this.tiebreakColumn = tiebreakColumn;
+    }
+
+    /** 平局列的当前值（与水位值一起构成复合游标）。 */
+    public String getTiebreakValue() {
+        return tiebreakValue;
+    }
+
+    public void setTiebreakValue(String tiebreakValue) {
+        this.tiebreakValue = tiebreakValue;
     }
 
     /** 上次跑完的实际模式（init / incremental）——「首跑后自动切增量」的可见证据。 */

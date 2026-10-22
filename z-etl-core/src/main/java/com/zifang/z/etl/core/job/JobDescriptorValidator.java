@@ -105,6 +105,17 @@ public final class JobDescriptorValidator {
             if (!isBlank(watermark.getTargetColumn()) && !Identifiers.isSafe(watermark.getTargetColumn())) {
                 errors.add("watermark.targetColumn 含非法标识符: " + watermark.getTargetColumn());
             }
+            if (!isBlank(watermark.getTiebreakColumn()) && !Identifiers.isSafe(watermark.getTiebreakColumn())) {
+                errors.add("watermark.tiebreakColumn 含非法标识符: " + watermark.getTiebreakColumn());
+            }
+            if (watermark.getOverlap() < 0L) {
+                errors.add("watermark.overlap 不能为负数");
+            }
+            String onOutOfRange = watermark.getOnOutOfRange() == null ? "FAIL"
+                    : watermark.getOnOutOfRange().trim().toUpperCase();
+            if (!"FAIL".equals(onOutOfRange) && !"RESET".equals(onOutOfRange)) {
+                errors.add("watermark.onOutOfRange 非法（可用: FAIL / RESET），实际值: " + watermark.getOnOutOfRange());
+            }
         }
         TransformSpec transform = descriptor.getTransform();
         if (transform != null) {

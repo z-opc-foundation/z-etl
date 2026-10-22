@@ -38,6 +38,8 @@ public final class EtlSchema {
                     + "watermark_column VARCHAR(128), "
                     + "watermark_type VARCHAR(32), "
                     + "watermark_value VARCHAR(256), "
+                    + "tiebreak_column VARCHAR(128), "
+                    + "tiebreak_value VARCHAR(256), "
                     + "last_mode VARCHAR(32), "
                     + "last_run_at BIGINT)",
             "CREATE TABLE IF NOT EXISTS " + TABLE_JOB_RUN + " ("
@@ -55,6 +57,19 @@ public final class EtlSchema {
                     + "reconciled INT, "
                     + "started_at BIGINT, "
                     + "finished_at BIGINT)"
+    };
+
+    /**
+     * 已存在的引擎库补列（复合游标的两列）。
+     *
+     * <p>{@code CREATE TABLE IF NOT EXISTS} 对**已建好的表**不会补列 ⇒ 老库升级时这两列会缺。
+     * 这里做一次「补列」：{@code ALTER TABLE ... ADD COLUMN}，列已存在时忽略。
+     * 方言差异：MySQL 报 1060「Duplicate column name」，H2 / PG 报「... already exists」——
+     * 两种措辞都归到「已存在」这一类，不当成失败。
+     */
+    private static final String[] COLUMN_ADDITIONS = new String[]{
+            "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_column VARCHAR(128)",
+            "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_value VARCHAR(256)"
     };
 
     private EtlSchema() {
@@ -90,5 +105,26 @@ public final class EtlSchema {
         } finally {
             statement.close();
         }
+        for (String alter : COLUMN_ADDITIONS) {
+            try {
+                Statement addColumn = connection.createStatement();
+                try {
+                    addColumn.execute(alter);
+                } finally {
+                    addColumn.close();
+                }
+            } catch (SQLException e) {
+                if (!isColumnAlreadyExists(e)) {
+                    throw e;
+                }
+            }
+        }
+    }
+
+    /** 「列已存在」类错误不算失败（老库补列口径）。 */
+    private static boolean isColumnAlreadyExists(SQLException e) {
+        String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        return message.contains("already exist") || message.contains("duplicate column")
+                || message.contains("duplicate column name");
     }
 }

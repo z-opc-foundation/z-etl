@@ -43,3 +43,8 @@ dist.stale-*/
 **/dist.stale-*/
 dist.bak-*/
 **/dist.bak-*/
+
+# 临时运行态（规范：一律写 .cache/）
+/.cache/
+**/__pycache__/
+*.pyc

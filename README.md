@@ -141,8 +141,8 @@ mvn -o test              # 24 个用例（core 23 + web 1）
 > 在 JDK 21+ 上会因读不了高版本 class 文件而失败（`Unsupported class file major version 67`）。
 > 例：`JAVA_HOME=$(/usr/libexec/java_home -v 1.8) mvn -o test`。
 
-三项验收的落点与复跑命令见 [`_doc/002_acceptance/001_验收复跑.md`](_doc/002_acceptance/001_验收复跑.md)；
-转换链（D4）三项验收见 [`_doc/002_acceptance/002_验收复跑-转换链.md`](_doc/002_acceptance/002_验收复跑-转换链.md)。
+三项验收的落点与复跑命令见 [`_doc/005_testing/001_验收复跑.md`](_doc/005_testing/001_验收复跑.md)；
+转换链（D4）三项验收见 [`_doc/005_testing/002_验收复跑-转换链.md`](_doc/005_testing/002_验收复跑-转换链.md)。
 
 > ⚠️ 验收全部跑在**本地 H2 内存库**上（源库 / 目标库 / 引擎元库三个独立库）：
 > 不连生产 RDS、不在 `oc` 库建表、不对任何真实库写入。
@@ -191,11 +191,19 @@ mvn -o test              # 24 个用例（core 23 + web 1）
   无可照抄的现成做法，故按卡给的形状参考 z-trade 的实际 pom 做法落定（`io.github.yuku123` + z-boot-parent）。
   z-dms 落地后如口径不同，只需改三处（根 pom groupId + 两个子模块的 `<parent>`）。
 
+## 文档目录
+
+本项目文档统一收口在 `_doc/` 下（八类固定编号表，桶按需存在）:
+
+- [`_doc/001_arch/`](_doc/001_arch/) — 架构总览
+- [`_doc/003_script/`](_doc/003_script/) — 构建与发布脚本
+- [`_doc/005_testing/`](_doc/005_testing/) — 验收复跑记录
+
 ## 相关任务
 
 | 任务 | 内容 | 状态 |
 |---|---|---|
 | TASK-20261012-011 / 012 | z-dms 仓骨架与形态 B 管控 | 未落地（本仓用 `DataSourceProvider` SPI 承接） |
-| TASK-20261012-014 | 增量手段：水位轮询 + 持久化断点续传（D3） | **已完成（2026-10-22）**：复合游标（`update_time` + 平局列 `id`，同秒多条不漏行）+ 页级提交推进水位（kill -9 后从断点续传）+ 游标越界明确失败不推进 + 时钟回拨滞留行可查可兜底（`overlap` 回溯窗口）；三项验收在本地 H2 实测通过，边界口径见 `_doc/002_acceptance/003_验收复跑-水位与断点续传.md`；binlog CDC 一行未写 |
+| TASK-20261012-014 | 增量手段：水位轮询 + 持久化断点续传（D3） | **已完成（2026-10-22）**：复合游标（`update_time` + 平局列 `id`，同秒多条不漏行）+ 页级提交推进水位（kill -9 后从断点续传）+ 游标越界明确失败不推进 + 时钟回拨滞留行可查可兜底（`overlap` 回溯窗口）；三项验收在本地 H2 实测通过，边界口径见 `_doc/005_testing/003_验收复跑-水位与断点续传.md`；binlog CDC 一行未写 |
 | TASK-20261012-015 | 转换深度：z-util-expr 行级 + z-script 沙箱（D4） | **已完成（2026-10-22）**：四类转换各一条真实规则端到端跑通 + 沙箱超时/越限拦截 + 重跑幂等；LUA/JS 硬拒绝；沙箱无内存配额与 Groovy 的 JDK 版本边界已记入 `_doc/001_arch/00-overview.md` §6 |
 | TASK-20261012-016 | 与 z-mq / z-lc 的分工成文进两仓 README（D5） | 未开始 |

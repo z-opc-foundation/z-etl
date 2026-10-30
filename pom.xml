@@ -78,7 +78,7 @@
         <!-- 版本口径全部由 parent 下发(maven.compiler.source/target=8、UTF-8、
              flatten-maven-plugin.version=1.7.3、maven-compiler-plugin.version=3.11.0)。
              这里只留父链不供的键: -->
-        <compile.version>8</compile.version>
+        <compile.version>17</compile.version>
         <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
         <maven-source-plugin.version>3.3.0</maven-source-plugin.version>
         <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>

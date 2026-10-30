@@ -184,8 +184,8 @@ mvn -o test              # 24 个用例（core 23 + web 1）
 
 - `groupId` = `io.github.yuku123`，`parent` = `io.github.yuku123:z-boot-parent:1.2.0`，
   版本走 `${revision}`（现 `1.0.0`）+ `flatten-maven-plugin`（oss 模式），`-Pcentral` profile **dormant**。
-- ⚠️ **本仓尚未发布到 Maven Central**（本轮不发布）。远端仓（`z-opc-foundation/z-etl`）**尚未创建**，
-  本地仓已建好并完成提交，推送待人工/调度者拍板（建远端仓 + 定可见性属对外动作）。
+- ✅ **已发布到 Maven Central**（2026-10-30）：`z-etl-core:1.0.0` / `z-etl-web:1.0.0`。
+  发版走 `mvn -Pcentral deploy`（**不要带 `-o`**，离线会静默跳过 publish goal），凭证与 gpg 口令在仓根 `.env`（不入库）。
 - ⚠️ `groupId` 口径的由来见根 pom 注释：卡面写的是 `com.zifang`，但同一句又要求「对齐 z-dms 的发版口径，
   先读 z-dms 的实际做法再定」——而 z-dms 仓本轮**尚未落地**（TASK-20261012-011 仍在 `pending/`），
   无可照抄的现成做法，故按卡给的形状参考 z-trade 的实际 pom 做法落定（`io.github.yuku123` + z-boot-parent）。

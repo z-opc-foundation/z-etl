@@ -27,3 +27,13 @@ target/
 
 # OS
 .DS_Store
+
+# ============ Maven Central 发布凭证与 GPG 密钥环（绝不入库） ============
+# 与 z-agent / z-boot / z-ops / z-team / z-ctc 同一口径：凭证只在仓库根的 .env，
+# 台账唯一源在 z-opc-foundation-lead/004_重要秘钥。
+.env
+.env.*
+
+# 2026-10-30 发中央配套：gpg 私钥环（空壳也不入库）
+.gnupg/
+**/.gnupg/

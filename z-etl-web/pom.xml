@@ -12,7 +12,7 @@
     </parent>
 
     <artifactId>z-etl-web</artifactId>
-    <name>z-etl-web</name>
+    <name>z-etl :: web</name>
     <packaging>jar</packaging>
 
     <description>ETL 管控面：job 登记 / 手动触发 / 水位与对账查询（REST）</description>

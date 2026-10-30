@@ -34,7 +34,7 @@
     <version>${revision}</version>
     <packaging>pom</packaging>
 
-    <name>z-etl</name>
+    <name>z-etl :: root</name>
     <description>ETL 引擎仓：job = reader → transform 链 → writer，JSON/yml 描述（DataX 式）</description>
 
     <url>https://github.com/z-opc-foundation/z-etl</url>

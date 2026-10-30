@@ -12,7 +12,7 @@
     </parent>
 
     <artifactId>z-etl-core</artifactId>
-    <name>z-etl-core</name>
+    <name>z-etl :: core</name>
     <packaging>jar</packaging>
 
     <description>ETL 引擎核心：job 模型 + reader/transform/writer + 执行器 + 水位与对账</description>

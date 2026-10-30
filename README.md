@@ -182,7 +182,7 @@ mvn -o test              # 24 个用例（core 23 + web 1）
 
 ## 坐标与发版口径
 
-- `groupId` = `io.github.yuku123`，`parent` = `io.github.yuku123:z-boot-parent:1.1.0`，
+- `groupId` = `io.github.yuku123`，`parent` = `io.github.yuku123:z-boot-parent:1.2.0`，
   版本走 `${revision}`（现 `1.0.0`）+ `flatten-maven-plugin`（oss 模式），`-Pcentral` profile **dormant**。
 - ⚠️ **本仓尚未发布到 Maven Central**（本轮不发布）。远端仓（`z-opc-foundation/z-etl`）**尚未创建**，
   本地仓已建好并完成提交，推送待人工/调度者拍板（建远端仓 + 定可见性属对外动作）。

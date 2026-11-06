@@ -182,7 +182,7 @@ mvn -o test              # 24 个用例（core 23 + web 1）
 
 ## 坐标与发版口径
 
-- `groupId` = `io.github.yuku123`，`parent` = `io.github.yuku123:z-boot-parent:1.2.1`，
+- `groupId` = `io.github.yuku123`，`parent` = `io.github.yuku123:z-boot-parent:1.2.2`，
   版本走 `${revision}`（现 `1.0.0`）+ `flatten-maven-plugin`（oss 模式），`-Pcentral` profile **dormant**。
 - ✅ **已发布到 Maven Central**（2026-10-30）：`z-etl-core:1.0.0` / `z-etl-web:1.0.0`。
   发版走 `mvn -Pcentral deploy`（**不要带 `-o`**，离线会静默跳过 publish goal），凭证与 gpg 口令在仓根 `.env`（不入库）。

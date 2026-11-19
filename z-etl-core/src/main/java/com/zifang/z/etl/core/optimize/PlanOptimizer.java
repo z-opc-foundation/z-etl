@@ -1,0 +1,166 @@
+package com.zifang.z.etl.core.optimize;
+
+import com.zifang.z.etl.core.pipeline.PipelineNode;
+import com.zifang.z.etl.core.pipeline.PipelineSpec;
+import com.zifang.z.etl.core.pipeline.PipelineValidator;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 计划优化器（DataFusion 的优化循环形状：固定顺序跑一轮改写规则）。
+ *
+ * <p>规则清单（默认三条，都保守）：
+ * <ol>
+ *   <li>{@link PushDownFilterRewriter}：SQL 谓词推回源库 WHERE；</li>
+ *   <li>{@link MergeMapRewriter}：相邻 map 合一；</li>
+ *   <li>{@link EliminateUnusedRewriter}：摘除到不了汇的死节点。</li>
+ * </ol>
+ *
+ * <p>刻意**不做**投影下推：filter / map / script 的 EL/GROOVY 表达式引用了哪些列
+ * 静态不可知，猜错列就是静默丢数据 —— 宁可不推（这条边界写在 README）。
+ *
+ * @author zifang
+ */
+public class PlanOptimizer {
+
+    private final List<PlanRewriter> rewriters = new ArrayList<PlanRewriter>();
+
+    public PlanOptimizer() {
+        rewriters.add(new PushDownFilterRewriter());
+        rewriters.add(new MergeMapRewriter());
+        rewriters.add(new EliminateUnusedRewriter());
+    }
+
+    /** 注册自定义规则（跑在默认规则之后）。 */
+    public PlanOptimizer register(PlanRewriter rewriter) {
+        rewriters.add(rewriter);
+        return this;
+    }
+
+    /** 优化结果（改写后的声明 + 改写备注）。 */
+    public static final class Optimized {
+
+        private final PipelineSpec spec;
+        private final List<String> notes;
+
+        public Optimized(PipelineSpec spec, List<String> notes) {
+            this.spec = spec;
+            this.notes = notes;
+        }
+
+        public PipelineSpec spec() {
+            return spec;
+        }
+
+        public List<String> notes() {
+            return notes;
+        }
+    }
+
+    /**
+     * 优化一条声明。
+     *
+     * @param spec 原声明
+     * @return 优化结果
+     */
+    public Optimized optimize(PipelineSpec spec) {
+        List<String> notes = new ArrayList<String>();
+        PipelineSpec current = spec;
+        for (PlanRewriter rewriter : rewriters) {
+            current = rewriter.rewrite(current, notes);
+        }
+        return new Optimized(current, notes);
+    }
+
+    /**
+     * 优化并返回改写后的声明（不管备注）。
+     *
+     * @param spec 原声明
+     * @return 优化后的声明
+     */
+    public PipelineSpec rewrite(PipelineSpec spec) {
+        return optimize(spec).spec();
+    }
+
+    /**
+     * 文本计划（Polars 的 {@code explain()} 风格）：拓扑序逐节点列出类型与关键配置。
+     *
+     * @param spec 流水线声明
+     * @return 计划文本
+     */
+    public String explain(PipelineSpec spec) {
+        Optimized optimized = optimize(spec);
+        PipelineSpec plan = optimized.spec();
+        StringBuilder sb = new StringBuilder();
+        sb.append("pipeline: ").append(plan.getName()).append(" (mode=").append(plan.getMode()).append(")\n");
+        List<String> topo = PipelineValidator.topologicalOrder(plan);
+        for (String id : topo) {
+            PipelineNode node = plan.node(id);
+            sb.append("  ").append(id).append("  [").append(node.getType()).append(']');
+            String detail = describe(node);
+            if (!detail.isEmpty()) {
+                sb.append(' ').append(detail);
+            }
+            sb.append('\n');
+        }
+        for (String note : optimized.notes()) {
+            sb.append("  * ").append(note).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 节点的关键配置摘要（explain 用）。 */
+    private String describe(PipelineNode node) {
+        StringBuilder sb = new StringBuilder();
+        switch (node.getOperatorType()) {
+            case JDBC_SOURCE:
+                append(sb, "table", node.string("table"));
+                append(sb, "where", node.string("where"));
+                append(sb, "eventTime", node.string("eventTimeColumn"));
+                break;
+            case FILTER:
+                append(sb, "expr", node.string("expression"));
+                append(sb, "rejectedTo", node.string("rejectedTo"));
+                break;
+            case MAP:
+                sb.append("columns=").append(node.mapList("columns").size());
+                break;
+            case SCRIPT:
+                append(sb, "name", node.string("name"));
+                append(sb, "engine", node.string("engine", "GROOVY"));
+                append(sb, "mode", node.string("mode", "column"));
+                break;
+            case AGGREGATE:
+            case WINDOW_AGGREGATE:
+                append(sb, "keyBy", node.strings("keyBy").toString());
+                sb.append(" aggs=").append(node.mapList("aggregates").size());
+                break;
+            case DEDUP:
+                append(sb, "keyBy", node.strings("keyBy").toString());
+                append(sb, "keep", node.string("keep", "first"));
+                break;
+            case JOIN:
+                append(sb, "left", node.string("left"));
+                append(sb, "right", node.string("right"));
+                break;
+            case JDBC_SINK:
+                append(sb, "table", node.string("table"));
+                append(sb, "writeMode", node.string("writeMode", "upsert"));
+                break;
+            default:
+                break;
+        }
+        return sb.toString();
+    }
+
+    private void append(StringBuilder sb, String key, String value) {
+        if (value != null) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(key).append('=').append(value);
+        }
+    }
+}

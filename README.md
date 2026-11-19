@@ -1,6 +1,11 @@
 # z-etl
 
-ETL 引擎仓。job = **reader → transform 链 → writer**，用 JSON / yml 描述（DataX 式）。
+ETL 引擎仓。两种玩法，一套零件：
+
+1. **线性作业**（DataX 式）：job = **reader → transform 链 → writer**，用 JSON / yml 描述；
+2. **Flink 式数据流管道**（D2 起）：把整个处理过程声明成一张 **DAG**（`jdbc.source → filter/map/script → aggregate/window.aggregate/dedup/join → jdbc.sink`），
+   引擎按 **记录一条一条推** 的流处理口径执行——键控状态、事件时间水位、窗口、旁路输出、
+   状态快照恢复、断点续传全都有（详见下文「数据流管道（Flink 式）」）。
 
 > 需求 008「数据集成（z-dms + z-etl）」的 M1 主体之一。本仓是 **z-dms（数据源管控）** 的第一个重度消费者
 > （D2 拍板）：z-dms 落地即被 z-etl 消费。
@@ -10,17 +15,21 @@ ETL 引擎仓。job = **reader → transform 链 → writer**，用 JSON / yml �
 ```
 z-etl/
 ├── pom.xml                    顶层 parent（自包含，CI-friendly ${revision} + flatten oss）
-├── z-etl-core/                引擎核心：job 模型 + reader/transform/writer + 执行器 + 水位 + 对账
+├── z-etl-core/                引擎核心
 │   └── src/main/java/com/zifang/z/etl/core/
-│       ├── job/               作业描述模型（JobDescriptor + 解析器 + 校验器）
+│       ├── job/               作业描述模型（JobDescriptor + 解析器 + 校验器）—— 线性作业
+│       ├── pipeline/          流水线声明模型（PipelineSpec/Node/Edge + 解析 + 校验 + DAG 拓扑）
+│       ├── runtime/           流式执行内核（Record/Operator/StateBackend/TimerService/水位 + PipelineExecutor）
+│       ├── operator/          算子集（source/filter/map/script/aggregate/window.aggregate/dedup/join/union/sinks）
+│       ├── optimize/          计划优化器（过滤下推 / 合并映射 / 死节点摘除 + explain()）
 │       ├── spi/               DataSourceProvider（数据源解析 SPI，z-dms 落地后由它提供实现）
-│       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推）
-│       ├── transform/         变换链（字段映射 → 行级表达式 → 脚本沙箱 → 类型归一）
+│       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推 + 流式拉取 fetchNextPage）
+│       ├── transform/         变换链（字段映射 → 行级表达式 → 脚本沙箱 → 类型归一）—— 线性作业用
 │       ├── writer/            写出器（批量 upsert + 幂等键）
 │       ├── checkpoint/        水位存储（落库 / 内存两实现）
 │       ├── reconcile/         对账器（行数 + 校验和双口径）
-│       ├── engine/            执行器 EtlEngine + 作业仓储（落库）+ 引擎自身库表
-│       └── util/              校验和、行内取值助手
+│       ├── engine/            旧执行器 EtlEngine + 作业仓储（落库）+ 引擎自身库表
+│       └── util/              校验和、行内取值、时长解析助手
 └── z-etl-web/                 管控面：job 登记 / 手动触发 / 水位与对账查询（REST）
     └── src/main/java/com/zifang/z/etl/web/
         ├── config/            EtlModuleDataSource（z.base.db.etl.* + @MapperScan 绑本域 sqlSessionFactory）
@@ -101,6 +110,123 @@ JSON 形态写成同一份内容即可（`{"job": {...}}` 或直接是描述对�
 > ⚠️ **Groovy 沙箱有 JDK 版本边界**：z-script 用 Groovy 3.0.9，实测 **JDK 8 ✓ / JDK 17 ✓ / JDK 23 ✗**
 > （脚本引用 JDK 类时报 `Unsupported class file major version 67`）⇒ 运行 JDK 需 ≤ 17。
 
+## 数据流管道（Flink 式）
+
+旧线性 job 之外的第二种玩法：整条处理过程声明成一张 **DAG**，引擎按 **记录一条一条推** 的流处理口径执行
+（设计参考：Flink 的 DataStream/窗口/水位/键控状态，Kestra/n8n 的命名空间算子类型串，
+Kafka Streams 的滚动聚合口径，Polars 的 `explain()`）。
+
+```yaml
+name: order-minute-rollup
+mode: auto
+nodes:
+  - id: src
+    type: jdbc.source                       # 源：分页游标 + SQL 下推 + 复合水位游标（与线性作业同一套零件）
+    config:
+      dataSourceRef: ds-oc-main
+      table: z_trade_order
+      pageSize: 200
+      eventTimeColumn: updated_at           # 事件时间 ⇒ 水位 = 最大事件时间 − maxOutOfOrderness
+      eventTimeType: TIMESTAMP
+      maxOutOfOrderness: 30s
+      resume: {column: updated_at, type: TIMESTAMP, tiebreakColumn: id, overlap: 0}
+  - id: paid
+    type: filter                            # 过滤：EL/GROOVY 表达式；未命中可走 rejectedTo 旁路（死信）
+    config: {expression: "status == 1", rejectedTo: dead}
+  - id: enriched
+    type: map                               # 表达式产新列（EL 默认 / GROOVY）
+    config:
+      columns:
+        - {name: amount_cny, engine: GROOVY, expression: "amount * 1.13", type: BIGDECIMAL}
+  - id: cleaned
+    type: script                            # 自由脚本（z-script 沙箱；产一列或整行替换 mode: row）
+    config:
+      name: pay_channel
+      engine: GROOVY
+      script: "def raw = payment_method\n(raw == null ? '' : raw.toString().trim().toUpperCase())\n"
+  - id: rollup
+    type: window.aggregate                  # 窗口聚合：事件时间窗口 + 水位触发 + 允许迟到
+    config:
+      keyBy: [pay_channel]
+      window: {type: tumbling, size: 5m}    # tumbling / sliding / session / global
+      allowedLateness: 1m
+      aggregates:
+        - {fn: COUNT, column: "*", alias: order_cnt}
+        - {fn: SUM, column: amount, alias: total_amount}
+  - id: sink
+    type: jdbc.sink
+    config:
+      dataSourceRef: ds-etl-landing
+      table: etl_order_rollup
+      writeMode: upsert
+      idempotencyKey: [pay_channel, windowStart]
+  - id: dead
+    type: console.sink
+edges:
+  - {from: src, to: paid}
+  - {from: paid, to: enriched}
+  - {from: enriched, to: cleaned}
+  - {from: cleaned, to: rollup}
+  - {from: rollup, to: sink}
+```
+
+执行（旧线性 job 也能编译成管道跑，`PipelineSpec.fromJobDescriptor`）：
+
+```java
+PipelineSpec spec = PipelineParser.parse(yamlOrJson);
+PipelineRunResult result = new PipelineExecutor(dataSourceProvider).execute(spec);
+result.getRecordsRead();          // 读出行数
+result.getRecordsWritten();       // 写出行数
+result.getNodeMetrics();          // 每节点计数（records-in / side-output 等）
+result.getWatermarkAfter();       // 本轮落下的水位
+```
+
+### 算子表（类型串：`家族.算子`，下划线/中划线视作点）
+
+| 类型串 | 族 | 干什么 | 关键 config |
+|---|---|---|---|
+| `jdbc.source` | 源 | 分页游标拉数 + SQL 下推 + 事件时间水位 + 复合游标断点续传 | `table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume` |
+| `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
+| `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
+| `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
+| `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
+| `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
+| `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
+| `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次） | `keyBy/aggregates: [{fn,column,alias}]` |
+| `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发 | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/aggregates` |
+| `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间） | `keyBy/keep/ttl` |
+| `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀 | `left/right/leftKey/rightKey/joinType/rightSuffix` |
+| `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
+| `console.sink` | 汇 | 打日志（调试） | — |
+| `collect.sink` | 汇 | 收进内存列表（测试/预览） | — |
+
+安全口径与线性作业完全一致：LUA/JS 硬拒绝；GROOVY 走 z-script 沙箱（墙钟超时 + 产出上限）；
+标识符全过 `Identifiers` 白名单；聚合函数白名单。
+
+### 执行语义（与 Flink 对齐的部分）
+
+| 语义 | 口径 |
+|---|---|
+| 执行模型 | 单线程推送（源拉一条 → 沿 DAG 推到底），定序确定 ⇒ 结果可复现；多源轮询拉取 |
+| 水位 | 全局水位 = 各**活跃**源水位的最小值；源结束不再拖住水位；无事件时间的记录不阻塞（归全局窗口） |
+| 窗口 | `[start, end)` 左闭右开；session 窗口相交自动合并；窗口触发后同键再迟到 ⇒ `allowedLateness` 内重算重发，之外丢弃并计数 |
+| 键控状态 | `ValueState/ListState/MapState`（堆实现，按算子隔离，`setCurrentKey` 口径与 Flink 一致） |
+| 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
+| 状态快照 | 跑完把全部键控状态序列化存进 `PipelineStateStore`（内存 / JDBC 落库），下轮恢复 |
+| 断点续传 | 复用线性作业的水位游标（复合游标 + 回溯窗口），跑完落 `Checkpoint`，下轮从水位接力 |
+| 模式 | `auto`（有快照/水位续跑，否则全量）/ `init`（清掉重跑）/ `incremental`（无水位直接失败） |
+
+### 计划优化器（`optimize` 包，DataFusion 式固定规则循环）
+
+| 规则 | 干什么 | 保守边界 |
+|---|---|---|
+| `PushDownFilterRewriter` | filter 节点显式声明的 SQL 谓词（`config.sql`）并入源 WHERE | 只沿「行保持」链（filter/map/script(落列)/type.normalize）上溯；链上有 `field.mapping` 就不推；EL/GROOVY **不翻译**成 SQL，不猜 |
+| `MergeMapRewriter` | 相邻两个 `map` 并成一个（列清单合并，语义等价：表达式都在累积行上求值） | 上游有扇出/扇入不并 |
+| `EliminateUnusedRewriter` | 到不了任何汇的死节点摘掉 | `rejectedTo` 指名的节点不算死 |
+
+**刻意不做投影下推**：EL/GROOVY 表达式引用了哪些列静态不可知，猜错列就是静默丢数据 —— 宁可不推。
+计划长什么样跑之前可以看：`new PlanOptimizer().explain(spec)`（拓扑序文本计划 + 优化备注）。
+
 ## 管控 REST
 
 | 方法 | 路径 | 说明 |
@@ -133,8 +259,8 @@ JSON 形态写成同一份内容即可（`{"job": {...}}` 或直接是描述对�
 ## 构建与验收
 
 ```bash
-mvn clean install        # 2 个模块，Java 8；发版改根 pom <revision> 一处
-mvn -o test              # 24 个用例（core 23 + web 1）
+mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
+mvn -o test              # 49 个用例（core 48 + web 1）
 ```
 
 > ⚠️ **跑测试请用 JDK 8 或 17**：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，
@@ -177,8 +303,9 @@ mvn -o test              # 24 个用例（core 23 + web 1）
 | `z-dms` | 数据源管控（连接工厂 / 探活 / 变更推送） | 本仓只**消费** `DataSourceDef`，不自己管数据源生命周期 |
 | `z-schedule` | 定时调度 | 本仓不自造调度器，触发交 z-schedule |
 
-**明确不做**：流式 CDC、Kettle 级拖拽可视化、触发器方案、BPMN 化编排、分布式 master-worker
-（M1 单机线程池起步）、自造调度器。
+**明确不做**：流式 CDC、运行时事件流（产生即消费，归 z-mq —— 管道的「流式」指**记录级推送执行**，
+数据仍是存量与批量）、Kettle 级拖拽可视化、触发器方案、BPMN 化编排、分布式 master-worker
+（单机线程池起步）、自造调度器。
 
 ## 坐标与发版口径
 

@@ -44,6 +44,15 @@ public class JdbcRowReader implements RowReader {
     /** 最近一次实际执行的 SQL（取证用：证明下推确实进了源库）。 */
     private volatile String lastExecutedSql;
 
+    /** 流式拉取用的连接（与 {@link #readPages} 的连接分开，互不干扰）。 */
+    private Connection pullConnection;
+
+    /** 流式拉取已取到第几页。 */
+    private int pullPageNo;
+
+    /** 流式拉取是否已到头。 */
+    private boolean pullExhausted;
+
     /**
      * @param dataSource       源数据源
      * @param spec             源定义
@@ -132,6 +141,48 @@ public class JdbcRowReader implements RowReader {
             close(connection);
         }
         return total;
+    }
+
+    /**
+     * 拉一页（**流式口径**：一次一页，内存上限 = pageSize）。
+     *
+     * <p>与 {@link #readPages(PageHandler)} 的差别：那是一口气拉到底（批处理口径），
+     * 这是一次一页（流处理口径）⇒ 上层可以「取一条处理一条」，水位能边跑边推，
+     * 窗口也能在流中途结算。
+     *
+     * @return 一页数据；已到头返回空列表
+     * @throws SQLException 读取失败
+     */
+    public List<Map<String, Object>> fetchNextPage() throws SQLException {
+        if (pullExhausted) {
+            return new ArrayList<Map<String, Object>>();
+        }
+        if (pullConnection == null) {
+            pullConnection = dataSource.getConnection();
+        }
+        int pageSize = Math.max(1, spec.getPageSize());
+        List<Map<String, Object>> page = fetchPage(pullConnection, pullPageNo, pageSize);
+        if (page.isEmpty()) {
+            pullExhausted = true;
+            return page;
+        }
+        pullPageNo++;
+        if (page.size() < pageSize) {
+            pullExhausted = true;
+        }
+        return page;
+    }
+
+    /** 关掉流式拉取占用的连接。 */
+    public void closePull() {
+        if (pullConnection != null) {
+            try {
+                pullConnection.close();
+            } catch (SQLException ignore) {
+                // 关闭失败不影响主流程
+            }
+            pullConnection = null;
+        }
     }
 
     @Override

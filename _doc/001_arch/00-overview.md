@@ -94,3 +94,27 @@ DDL 见 `com.zifang.z.etl.core.engine.EtlSchema`（`CREATE TABLE IF NOT EXISTS`�
   `Unsupported class file major version 67`）⇒ 运行 z-etl（含脚本清洗步骤）的 JDK 需 ≤ 17，
   或升级 z-script 的 Groovy 版本；
 - 不做分布式 master-worker，不做 CDC，不做可视化编辑器。
+
+## 7. 数据流管道（Flink 式，第二种玩法）
+
+在「线性 job」之上，z-etl 现在支持把整条处理过程声明成 **DAG**（`pipeline/` 声明模型 +
+`runtime/` 流式执行内核 + `operator/` 算子集 + `optimize/` 计划优化器）：
+
+- **声明**：`PipelineSpec`（JSON/yml），节点带命名空间类型串（Kestra 式：`jdbc.source` /
+  `window.aggregate`），边连成 DAG；校验器管 id 唯一、源/汇形态、环检测（报成环节点）。
+- **执行**（`PipelineExecutor`）：源拉一条 → 沿 DAG 推到底（单线程定序，结果可复现）；
+  全局水位 = 各活跃源最小值；水位推进沿拓扑序传播并触发事件时间定时器；流结束水位推到最大
+  ⇒ 全部窗口结算；反向拓扑序关算子（汇刷批）→ 存状态快照 → 落水位游标。
+- **算子**：filter（旁路输出 rejectedTo 死信）/ map / script（z-script 沙箱，可整行替换）/
+  field.mapping / type.normalize / union / aggregate（键控滚动）/ window.aggregate
+  （tumbling/sliding/session/global + allowedLateness 迟到重发）/ dedup / join / 三种 sink。
+- **状态**：`HeapStateBackend` 的键控状态（ValueState/ListState/MapState，`setCurrentKey` 口径
+  对齐 Flink），跑完快照进 `PipelineStateStore`，下轮恢复。
+- **优化**：`PlanOptimizer` 固定规则循环 —— 过滤下推（只推显式 `sql`，EL/GROOVY 不翻译不猜）/
+  相邻 map 合并 / 死节点摘除；`explain()` 出文本计划；**投影下推刻意不做**（列引用静态不可知）。
+- **兼容**：旧 `JobDescriptor` 一行编译成等价线性管道（`PipelineSpec.fromJobDescriptor`），
+  端到端落表与旧引擎逐字段一致（`PipelineEndToEndTest` 验收）。
+- **安全边界不变**：LUA/JS 硬拒绝、标识符白名单、聚合函数白名单、脚本超时/产出上限；
+  「不做运行时事件流（归 z-mq）」的分工也不变 —— 管道的「流式」指记录级推送执行，数据仍是存量批量。
+
+验收：`PipelineEndToEndTest`（9 项）+ `PipelinePlannerTest`（10 项），本地 H2。

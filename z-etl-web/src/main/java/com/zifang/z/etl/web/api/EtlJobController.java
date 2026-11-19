@@ -3,6 +3,9 @@ package com.zifang.z.etl.web.api;
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.engine.EtlRunResult;
 import com.zifang.z.etl.core.job.JobDescriptor;
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -47,7 +50,8 @@ public class EtlJobController {
      * @return 作业名
      */
     @PostMapping
-    public Map<String, Object> register(@RequestBody String descriptorText) {
+    @BizApi(summary = "登记作业", description = "登记作业。", tags = { "z-etl" })
+    public Map<String, Object> register(@RequestBody @BizParam(name = "descriptorText", type = BizField.FieldType.STRING, description = "描述原文（JSON 或 yml）", position = BizParam.Position.BODY) String descriptorText) {
         String name = service.register(descriptorText);
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("name", name);
@@ -61,6 +65,7 @@ public class EtlJobController {
      * @return 作业名
      */
     @GetMapping
+    @BizApi(summary = "作业名列表", description = "作业名列表。", tags = { "z-etl" })
     public Map<String, Object> list() {
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("jobs", service.list());
@@ -74,7 +79,8 @@ public class EtlJobController {
      * @return 描述
      */
     @GetMapping("/{name}")
-    public ResponseEntity<JobDescriptor> get(@PathVariable("name") String name) {
+    @BizApi(summary = "作业描述", description = "作业描述。", tags = { "z-etl" })
+    public ResponseEntity<JobDescriptor> get(@PathVariable("name") @BizParam(name = "name", type = BizField.FieldType.STRING, description = "作业名", position = BizParam.Position.PATH) String name) {
         JobDescriptor descriptor = service.get(name);
         return descriptor == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(descriptor);
     }
@@ -86,7 +92,8 @@ public class EtlJobController {
      * @return 运行结果
      */
     @PostMapping("/{name}/run")
-    public EtlRunResult run(@PathVariable("name") String name) {
+    @BizApi(summary = "触发作业", description = "触发作业。", tags = { "z-etl" })
+    public EtlRunResult run(@PathVariable("name") @BizParam(name = "name", type = BizField.FieldType.STRING, description = "作业名", position = BizParam.Position.PATH) String name) {
         return service.run(name);
     }
 
@@ -97,7 +104,8 @@ public class EtlJobController {
      * @return 水位
      */
     @GetMapping("/{name}/watermark")
-    public ResponseEntity<Checkpoint> watermark(@PathVariable("name") String name) {
+    @BizApi(summary = "水位记录", description = "水位记录。", tags = { "z-etl" })
+    public ResponseEntity<Checkpoint> watermark(@PathVariable("name") @BizParam(name = "name", type = BizField.FieldType.STRING, description = "作业名", position = BizParam.Position.PATH) String name) {
         Checkpoint checkpoint = service.watermark(name);
         return checkpoint == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(checkpoint);
     }
@@ -110,8 +118,10 @@ public class EtlJobController {
      * @return 履历
      */
     @GetMapping("/{name}/runs")
-    public Map<String, Object> runs(@PathVariable("name") String name,
-                                    @RequestParam(value = "limit", defaultValue = "20") int limit) {
+    @BizApi(summary = "运行履历", description = "运行履历。", tags = { "z-etl" })
+    public Map<String, Object> runs(@PathVariable("name") @BizParam(name = "name", type = BizField.FieldType.STRING, description = "作业名", position = BizParam.Position.PATH) String name,
+                                    @RequestParam(value = "limit", defaultValue = "20")
+                                    @BizParam(name = "limit", type = BizField.FieldType.INTEGER, description = "条数上限", position = BizParam.Position.QUERY) int limit) {
         List<EtlRunResult> history = service.history(name, limit);
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("job", name);
@@ -119,3 +129,6 @@ public class EtlJobController {
         return body;
     }
 }
+
+
+

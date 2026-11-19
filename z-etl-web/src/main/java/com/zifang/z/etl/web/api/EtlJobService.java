@@ -8,6 +8,7 @@ import com.zifang.z.etl.core.engine.JobRepository;
 import com.zifang.z.etl.core.job.JobDescriptor;
 import com.zifang.z.etl.core.job.JobDescriptorParser;
 import com.zifang.z.etl.core.job.JobDescriptorValidator;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class EtlJobService {
      * @param descriptorText 描述原文
      * @return 作业名
      */
+    @BizMethod(name = "登记作业（描述文本可以是 JSON 或 yml）", module = "z-etl", description = "登记作业（描述文本可以是 JSON 或 yml）。", operation = BizMethod.Operation.CREATE)
     public String register(String descriptorText) {
         JobDescriptor descriptor = JobDescriptorParser.parse(descriptorText);
         JobDescriptorValidator.validate(descriptor);
@@ -48,6 +50,7 @@ public class EtlJobService {
      *
      * @return 作业名
      */
+    @BizMethod(name = "作业名列表", module = "z-etl", description = "作业名列表。", operation = BizMethod.Operation.QUERY)
     public List<String> list() {
         return jobRepository.listNames();
     }
@@ -58,6 +61,7 @@ public class EtlJobService {
      * @param name 作业名
      * @return 描述（不存在返回 null）
      */
+    @BizMethod(name = "取作业描述", module = "z-etl", description = "取作业描述。", operation = BizMethod.Operation.QUERY)
     public JobDescriptor get(String name) {
         return jobRepository.find(name);
     }
@@ -68,6 +72,7 @@ public class EtlJobService {
      * @param name 作业名
      * @return 运行结果
      */
+    @BizMethod(name = "触发作业", module = "z-etl", description = "触发作业。", operation = BizMethod.Operation.ACTION)
     public EtlRunResult run(String name) {
         return etlEngine.run(name);
     }
@@ -78,6 +83,7 @@ public class EtlJobService {
      * @param name 作业名
      * @return 水位记录（没有返回 null）
      */
+    @BizMethod(name = "取水位记录（「首跑后自动切增量」的水位可见性）", module = "z-etl", description = "取水位记录（「首跑后自动切增量」的水位可见性）。", operation = BizMethod.Operation.ACTION)
     public Checkpoint watermark(String name) {
         return checkpointStore.load(name);
     }
@@ -89,7 +95,11 @@ public class EtlJobService {
      * @param limit 条数上限（≤0 不限）
      * @return 履历
      */
+    @BizMethod(name = "运行履历", module = "z-etl", description = "运行履历。", operation = BizMethod.Operation.ACTION)
     public List<EtlRunResult> history(String name, int limit) {
         return jobRepository.runHistory(name, limit);
     }
 }
+
+
+

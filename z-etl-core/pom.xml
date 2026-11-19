@@ -75,6 +75,17 @@
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-script-engine</artifactId>
         </dependency>
+        <!-- 编排面（仅测试）：z-wf-core 2.x 自研流程引擎。
+             用法：z-wf 流程的 serviceTask 通过 WfJavaDelegate 驱动 PipelineExecutor，
+             网关按搬运结果分支 —— 见 WfPipelineOrchestrationTest。
+             ⚠️ 必须锁 2.x：同坐标 1.x 是 Camunda 线引擎（坐标同名异物，见 z-wf README）。
+             生产编排时把该依赖升为 compile 并由调用方装配即可，core 主代码不耦合 z-wf。 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-wf-core</artifactId>
+            <version>2.0.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 </project>

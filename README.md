@@ -227,6 +227,22 @@ result.getWatermarkAfter();       // 本轮落下的水位
 **刻意不做投影下推**：EL/GROOVY 表达式引用了哪些列静态不可知，猜错列就是静默丢数据 —— 宁可不推。
 计划长什么样跑之前可以看：`new PlanOptimizer().explain(spec)`（拓扑序文本计划 + 优化备注）。
 
+### 与 z-wf 的编排分工（管道之间归流程引擎）
+
+z-etl 的 DAG 管**单条管道内部**的数据流；**管道与管道之间**的编排归 z-wf（自研流程引擎，坐标
+`io.github.yuku123:z-wf-core`，**必须锁 2.x** —— 同坐标 1.x 是 Camunda 线引擎，见 z-wf README）：
+
+- z-wf 流程的 `serviceTask` 挂一个 `WfJavaDelegate`，委托里调
+  `new PipelineExecutor(provider).execute(PipelineParser.parse(yaml))`；
+- 排他网关按流程变量分支：delegate 把搬运行数写回变量（如 `lastWritten`），
+  网关条件 `lastWritten > 0` ⇒ 「搬到了东西才跑下游汇总，颗粒无收直接收工」；
+- 注意：数据源 SPI / DataSource 这类连接性对象**不能放进流程变量**
+  （z-wf 持久化会深拷贝变量 ⇒ `NotSerializableException`），走 delegate 构造注入。
+
+跨仓集成验收：[`WfPipelineOrchestrationTest`](z-etl-core/src/test/java/com/zifang/z/etl/core/WfPipelineOrchestrationTest.java)
+（正路：搬运 → 网关 → 汇总管道跑通落表；兜路：空源 ⇒ default 分支 ⇒ 汇总不跑）。
+core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖升为 compile、delegate 交给 Spring 装配。
+
 ## 管控 REST
 
 | 方法 | 路径 | 说明 |
@@ -260,7 +276,7 @@ result.getWatermarkAfter();       // 本轮落下的水位
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 49 个用例（core 48 + web 1）
+mvn -o test              # 51 个用例（core 50 + web 1）
 ```
 
 > ⚠️ **跑测试请用 JDK 8 或 17**：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

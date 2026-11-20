@@ -108,6 +108,8 @@ public final class OperatorFactory {
                 return new JoinOperator(node);
             case INTERVAL_JOIN:
                 return new IntervalJoinOperator(node);
+            case DIM_JOIN:
+                return new DimJoinOperator(node);
             case UNION:
                 return new UnionOperator(node);
             case JDBC_SINK:

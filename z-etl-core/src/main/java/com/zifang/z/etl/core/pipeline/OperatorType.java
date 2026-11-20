@@ -73,6 +73,9 @@ public enum OperatorType {
     /** 区间连接（左右两路按关联键 + 事件时间区间关联；Flink 的 IntervalJoin 口径）。 */
     INTERVAL_JOIN("interval.join", Kind.STATEFUL),
 
+    /** 维表关联（右流即维表：同键替换热更新、TTL 过期、select 投影；Flink broadcast-state 口径）。 */
+    DIM_JOIN("dim.join", Kind.STATEFUL),
+
     /** JDBC 落地（批量 upsert / insert）。 */
     JDBC_SINK("jdbc.sink", Kind.SINK),
 
@@ -181,6 +184,10 @@ public enum OperatorType {
         if ("interval.join".equals(normalized) || "time.join".equals(normalized)
                 || "intervalJoin".equals(normalized)) {
             return INTERVAL_JOIN;
+        }
+        if ("dim.join".equals(normalized) || "dim.lookup".equals(normalized)
+                || "lookup.join".equals(normalized) || "broadcast.join".equals(normalized)) {
+            return DIM_JOIN;
         }
         if ("aggregate.window".equals(normalized)) {
             return WINDOW_AGGREGATE;

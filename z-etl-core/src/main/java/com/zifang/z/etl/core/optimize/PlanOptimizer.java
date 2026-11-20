@@ -166,10 +166,14 @@ public class PlanOptimizer {
                 break;
             case JOIN:
             case INTERVAL_JOIN:
+            case DIM_JOIN:
                 append(sb, "left", node.string("left"));
                 append(sb, "right", node.string("right"));
                 if (node.string("within") != null) {
                     append(sb, "within", node.string("within"));
+                }
+                if (node.string("ttl") != null) {
+                    append(sb, "ttl", node.string("ttl"));
                 }
                 break;
             case JDBC_SINK:

@@ -293,6 +293,7 @@ edges:
 | `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
 | `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
 | `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
+| `file.xlsx.sink` | 汇 | 写 Excel 文件（**零依赖**：zip + worksheet；时间列写回序列数 + 日期样式 ⇒ 用 xlsx 源读回来还是 Timestamp） | `path/sheetName/header/columns` |
 | `http.sink` | 汇 | POST 到外部接口（webhook / 业务 API） | `url/method/headers/format(json\|form)/timeoutMs` |
 | `message.sink` | 汇 | 发到消息总线（Kafka / RocketMQ / 库表队列） | `topic/keyColumn/keyField/format(json\|text)` |
 | `console.sink` | 汇 | 打日志（调试） | — |
@@ -475,7 +476,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 123 个用例（core 120 + web 3）
+mvn -o test              # 126 个用例（core 123 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

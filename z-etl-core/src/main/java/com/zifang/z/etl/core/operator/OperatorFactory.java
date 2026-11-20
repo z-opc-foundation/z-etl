@@ -3,6 +3,7 @@ package com.zifang.z.etl.core.operator;
 import com.zifang.z.etl.core.connector.FileCsvSink;
 import com.zifang.z.etl.core.connector.FileCsvSource;
 import com.zifang.z.etl.core.connector.FileJsonSink;
+import com.zifang.z.etl.core.connector.FileXlsxSink;
 import com.zifang.z.etl.core.connector.FileJsonSource;
 import com.zifang.z.etl.core.connector.FileXlsxSource;
 import com.zifang.z.etl.core.connector.HttpSink;
@@ -111,6 +112,8 @@ public final class OperatorFactory {
                 return new FileCsvSink(node);
             case FILE_JSON_SINK:
                 return new FileJsonSink(node);
+            case FILE_XLSX_SINK:
+                return new FileXlsxSink(node);
             case HTTP_SINK:
                 return new HttpSink(node);
             case MESSAGE_SINK:

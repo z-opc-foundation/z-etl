@@ -79,6 +79,9 @@ public final class ConnectorTypes {
         if ("json".equals(key) || "ndjson".equals(key) || "file.json".equals(key)) {
             return OperatorType.FILE_JSON_SINK;
         }
+        if ("xlsx".equals(key) || "excel".equals(key) || "file.xlsx".equals(key)) {
+            return OperatorType.FILE_XLSX_SINK;
+        }
         if ("http".equals(key) || "rest".equals(key) || "webhook".equals(key) || "api".equals(key)) {
             return OperatorType.HTTP_SINK;
         }
@@ -119,6 +122,11 @@ public final class ConnectorTypes {
                 break;
             case SCRIPT_SOURCE:
                 keys.add("script");
+                break;
+            case FILE_CSV_SINK:
+            case FILE_JSON_SINK:
+            case FILE_XLSX_SINK:
+                keys.add("path");
                 break;
             case MESSAGE_SOURCE:
             case MESSAGE_SINK:

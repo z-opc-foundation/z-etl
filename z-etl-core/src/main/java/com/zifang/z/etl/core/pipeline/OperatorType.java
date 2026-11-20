@@ -79,6 +79,9 @@ public enum OperatorType {
     /** JSON 文件落地（NDJSON / JSON 数组）。 */
     FILE_JSON_SINK("file.json.sink", Kind.SINK),
 
+    /** Excel 文件落地（xlsx，零依赖写 zip + worksheet）。 */
+    FILE_XLSX_SINK("file.xlsx.sink", Kind.SINK),
+
     /** HTTP 接口落地（webhook / 业务 API）。 */
     HTTP_SINK("http.sink", Kind.SINK),
 
@@ -220,6 +223,10 @@ public enum OperatorType {
         if ("json.sink".equals(normalized) || "ndjson.sink".equals(normalized)
                 || "file.json.out".equals(normalized)) {
             return FILE_JSON_SINK;
+        }
+        if ("xlsx.sink".equals(normalized) || "excel.sink".equals(normalized)
+                || "file.xlsx.out".equals(normalized)) {
+            return FILE_XLSX_SINK;
         }
         if ("http.api.sink".equals(normalized) || "webhook.sink".equals(normalized)
                 || "rest.sink".equals(normalized)) {

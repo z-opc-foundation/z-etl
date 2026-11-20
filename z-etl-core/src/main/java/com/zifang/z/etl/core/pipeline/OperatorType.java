@@ -64,6 +64,9 @@ public enum OperatorType {
     /** 多路合并（把多条入边接成一路；也可以不写该节点，靠多入边天然合并）。 */
     UNION("union", Kind.TRANSFORM),
 
+    /** 炸行（一行拆多行：数组列炸开 / 字符串按分隔符切分；Flink SQL 的 UNNEST 口径）。 */
+    EXPLODE("explode", Kind.TRANSFORM),
+
     /** 键控聚合（无窗口，滚动累计值，键变化即发一次）。 */
     AGGREGATE("aggregate", Kind.STATEFUL),
 
@@ -183,6 +186,9 @@ public enum OperatorType {
         }
         if ("expr.map".equals(normalized) || "expression.map".equals(normalized)) {
             return MAP;
+        }
+        if ("unnest".equals(normalized) || "flat.map".equals(normalized)) {
+            return EXPLODE;
         }
         if ("groovy.script".equals(normalized) || "script.groovy".equals(normalized)) {
             return SCRIPT;

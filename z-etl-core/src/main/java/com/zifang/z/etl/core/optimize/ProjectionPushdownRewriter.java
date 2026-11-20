@@ -207,6 +207,12 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
                 columns.add(template.group(1));
             }
             columns.addAll(node.strings("bodyColumns"));
+        } else if (type == OperatorType.EXPLODE) {
+            // 炸行读的列必须活着传到它那儿，否则炸的是空
+            String column = node.string("column");
+            if (column != null && !column.trim().isEmpty()) {
+                columns.add(ColumnReferences.normalize(column.trim()));
+            }
         } else if (type == OperatorType.DEDUP
                 || type == OperatorType.AGGREGATE
                 || type == OperatorType.WINDOW_AGGREGATE) {

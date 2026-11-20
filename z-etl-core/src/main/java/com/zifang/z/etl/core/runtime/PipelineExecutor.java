@@ -269,7 +269,9 @@ public class PipelineExecutor {
                         continue;
                     }
                     allDone = false;
+                    long pullStart = System.nanoTime();
                     Record record = sources.get(i).next();
+                    contexts.get(sourceIds.get(i)).addElapsedNanos(System.nanoTime() - pullStart);
                     if (record == null) {
                         done[i] = true;
                         continue;
@@ -477,10 +479,15 @@ public class PipelineExecutor {
             if (context != null) {
                 context.count("records-in");
             }
+            long start = System.nanoTime();
             try {
                 downstream.processElement(record, nodeOutputs.get(to), from);
             } catch (Exception e) {
                 throw new IllegalStateException("节点 " + from + " → " + to + " 派发失败: " + e.getMessage(), e);
+            } finally {
+                if (context != null) {
+                    context.addElapsedNanos(System.nanoTime() - start);
+                }
             }
         }
     }

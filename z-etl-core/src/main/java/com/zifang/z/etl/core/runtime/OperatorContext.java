@@ -72,6 +72,19 @@ public class OperatorContext {
         return counter == null ? 0L : counter.get();
     }
 
+    /** 记一段处理耗时（纳秒；落进计数器表，键 {@code elapsed-nanos}）。 */
+    public void addElapsedNanos(long deltaNanos) {
+        if (deltaNanos > 0L) {
+            counter("elapsed-nanos").addAndGet(deltaNanos);
+        }
+    }
+
+    /** 本算子累计处理耗时（纳秒）。 */
+    public long elapsedNanos() {
+        AtomicLong counter = counters.get("elapsed-nanos");
+        return counter == null ? 0L : counter.get();
+    }
+
     /** 计数器快照。 */
     public Map<String, Long> counters() {
         Map<String, Long> snapshot = new java.util.LinkedHashMap<String, Long>();

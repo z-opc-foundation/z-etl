@@ -240,7 +240,7 @@ PipelineSpec spec = PipelineParser.parse(yamlOrJson);
 PipelineRunResult result = new PipelineExecutor(dataSourceProvider).execute(spec);
 result.getRecordsRead();          // 读出行数
 result.getRecordsWritten();       // 写出行数
-result.getNodeMetrics();          // 每节点计数（records-in / side-output 等）
+result.getNodeMetrics();          // 每节点计数（records-in / elapsed-nanos 逐节点耗时 / side-output 等）
 result.getWatermarkAfter();       // 本轮落下的水位
 ```
 
@@ -491,7 +491,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 129 个用例（core 126 + web 3）
+mvn -o test              # 131 个用例（core 128 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

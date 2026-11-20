@@ -167,6 +167,9 @@ public final class JobDescriptorValidator {
             checkScripts(errors, transform.getScripts());
         }
         checkPushdown(errors, source == null ? null : source.getPushdown());
+        if (descriptor.getRetry() != null) {
+            errors.addAll(descriptor.getRetry().errors("job"));
+        }
         return errors;
     }
 

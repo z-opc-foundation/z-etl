@@ -56,6 +56,9 @@ public class JobDescriptor {
     /** 水位定义；为空表示该 job 无增量语义（只能全量跑）。 */
     private WatermarkSpec watermark;
 
+    /** 失败重试策略（默认不重试）。 */
+    private RetrySpec retry;
+
     public String getName() {
         return name;
     }
@@ -110,6 +113,14 @@ public class JobDescriptor {
 
     public void setIdempotencyKey(List<String> idempotencyKey) {
         this.idempotencyKey = idempotencyKey == null ? new ArrayList<String>() : idempotencyKey;
+    }
+
+    public RetrySpec getRetry() {
+        return retry;
+    }
+
+    public void setRetry(RetrySpec retry) {
+        this.retry = retry;
     }
 
     public WatermarkSpec getWatermark() {

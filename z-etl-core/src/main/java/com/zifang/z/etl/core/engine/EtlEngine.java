@@ -9,6 +9,7 @@ import com.zifang.z.etl.core.job.JobDescriptor;
 import com.zifang.z.etl.core.job.JobDescriptorValidator;
 import com.zifang.z.etl.core.job.JobMode;
 import com.zifang.z.etl.core.job.PushdownSpec;
+import com.zifang.z.etl.core.job.RetrySpec;
 import com.zifang.z.etl.core.job.ScriptSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.job.TargetSpec;
@@ -32,6 +33,7 @@ import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.transform.ScriptTransformer;
 import com.zifang.z.etl.core.transform.TransformChain;
 import com.zifang.z.etl.core.transform.TypeNormalizationTransformer;
+import com.zifang.z.etl.core.util.Backoff;
 import com.zifang.z.etl.core.util.Checksums;
 import com.zifang.z.etl.core.util.RowValues;
 import com.zifang.z.etl.core.writer.ConnectorRowWriter;
@@ -114,12 +116,50 @@ public class EtlEngine {
     }
 
     /**
-     * 跑一个作业描述。
+     * 跑一个作业描述（按 {@code retry} 策略失败重试）。
+     *
+     * <p>默认不重试（{@code maxAttempts=1}）；声明了重试时，失败会**整体重跑**——
+     * 水位只在本页写成功后推进 ⇒ 重跑从上次成功页接力，目标侧又是幂等 upsert ⇒ 不重不漏。
      *
      * @param descriptor 作业描述
      * @return 运行结果
      */
     public EtlRunResult run(JobDescriptor descriptor) {
+        RetrySpec retry = descriptor.getRetry() == null ? new RetrySpec() : descriptor.getRetry();
+        int maxAttempts = retry.effectiveMaxAttempts();
+        if (maxAttempts == 1) {
+            // 不声明重试 ⇒ 异常原样抛出（行为与从前完全一致）
+            EtlRunResult result = runOnce(descriptor);
+            record(descriptor, result);
+            return result;
+        }
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                EtlRunResult result = runOnce(descriptor);
+                if (attempt > 1) {
+                    result.addNote("第 " + attempt + " 次尝试成功（前 " + (attempt - 1) + " 次失败后重试）");
+                }
+                record(descriptor, result);
+                return result;
+            } catch (RuntimeException e) {
+                last = e;
+                if (attempt < maxAttempts) {
+                    Backoff.sleep(retry.backoffFor(attempt));
+                }
+            }
+        }
+        throw new IllegalStateException("作业 " + descriptor.getName() + " 连续 " + maxAttempts
+                + " 次失败（最后一次: " + (last == null ? "未知" : last.getMessage()) + "）", last);
+    }
+
+    /**
+     * 跑一个作业描述（单次尝试；重试由 {@link #run(JobDescriptor)} 负责）。
+     *
+     * @param descriptor 作业描述
+     * @return 运行结果
+     */
+    private EtlRunResult runOnce(JobDescriptor descriptor) {
         JobDescriptorValidator.validate(descriptor);
 
         EtlRunResult result = new EtlRunResult();
@@ -323,10 +363,14 @@ public class EtlEngine {
 
         result.setFinishedAt(System.currentTimeMillis());
 
+        return result;
+    }
+
+    /** 记录运行履历（重试包装层负责，保证「第 N 次尝试成功」的注记也在履历里）。 */
+    private void record(JobDescriptor descriptor, EtlRunResult result) {
         if (jobRepository != null) {
             jobRepository.recordRun(result);
         }
-        return result;
     }
 
     /**

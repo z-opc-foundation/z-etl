@@ -3,6 +3,7 @@ package com.zifang.z.etl.core.engine;
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.optimize.PlanOptimizer;
+import com.zifang.z.etl.core.job.RetrySpec;
 import com.zifang.z.etl.core.pipeline.PipelineParser;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
@@ -13,6 +14,7 @@ import com.zifang.z.etl.core.runtime.PipelineStateStore;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
+import com.zifang.z.etl.core.util.Backoff;
 
 import java.util.List;
 
@@ -91,11 +93,39 @@ public class PipelineEngine {
             throw new IllegalArgumentException("流水线不存在: " + name
                     + "（已登记: " + String.join(", ", repository.listNames()) + "）");
         }
+        RetrySpec retry = spec.getRetry() == null ? new RetrySpec() : spec.getRetry();
+        int maxAttempts = retry.effectiveMaxAttempts();
+        if (maxAttempts == 1) {
+            // 不声明重试 ⇒ 异常原样抛出（行为与从前完全一致）
+            PipelineRunResult result = runOnce(spec);
+            repository.saveRun(result);
+            return result;
+        }
+        Exception last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                PipelineRunResult result = runOnce(spec);
+                if (attempt > 1) {
+                    result.addNote("第 " + attempt + " 次尝试成功（前 " + (attempt - 1) + " 次失败后重试）");
+                }
+                repository.saveRun(result);
+                return result;
+            } catch (Exception e) {
+                last = e;
+                if (attempt < maxAttempts) {
+                    Backoff.sleep(retry.backoffFor(attempt));
+                }
+            }
+        }
+        throw new IllegalStateException("流水线 " + name + " 连续 " + maxAttempts
+                + " 次失败（最后一次: " + (last == null ? "未知" : last.getMessage()) + "）", last);
+    }
+
+    /** 跑一次（不落履历）；重试与落履历由 {@link #run(String)} 负责。 */
+    private PipelineRunResult runOnce(PipelineSpec spec) throws Exception {
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
                 new ScriptSandbox(), checkpointStore, stateStore, messageBus);
-        PipelineRunResult result = executor.execute(spec);
-        repository.saveRun(result);
-        return result;
+        return executor.execute(spec);
     }
 
     /** 水位记录（断点续传的「读到哪了」）；没有返回 {@code null}。 */

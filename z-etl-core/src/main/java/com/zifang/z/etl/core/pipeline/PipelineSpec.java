@@ -3,6 +3,7 @@ package com.zifang.z.etl.core.pipeline;
 import com.zifang.z.etl.core.job.ExpressionSpec;
 import com.zifang.z.etl.core.job.FieldMapping;
 import com.zifang.z.etl.core.job.JobDescriptor;
+import com.zifang.z.etl.core.job.RetrySpec;
 import com.zifang.z.etl.core.job.ScriptSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.job.TargetSpec;
@@ -58,6 +59,9 @@ public class PipelineSpec {
     /** 检查点配置（间隔 / 模式 / 状态后端）。 */
     private Map<String, Object> checkpoint = new LinkedHashMap<String, Object>();
 
+    /** 失败重试策略（默认不重试）。 */
+    private RetrySpec retry;
+
     public String getName() {
         return name;
     }
@@ -104,6 +108,14 @@ public class PipelineSpec {
 
     public void setCheckpoint(Map<String, Object> checkpoint) {
         this.checkpoint = checkpoint == null ? new LinkedHashMap<String, Object>() : checkpoint;
+    }
+
+    public RetrySpec getRetry() {
+        return retry;
+    }
+
+    public void setRetry(RetrySpec retry) {
+        this.retry = retry;
     }
 
     /** 按 id 取节点；取不到返回 {@code null}。 */

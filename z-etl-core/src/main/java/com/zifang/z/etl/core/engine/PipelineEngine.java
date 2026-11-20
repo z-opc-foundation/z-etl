@@ -2,6 +2,8 @@ package com.zifang.z.etl.core.engine;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
+import com.zifang.z.etl.core.checkpoint.Savepoint;
+import com.zifang.z.etl.core.checkpoint.Savepoints;
 import com.zifang.z.etl.core.optimize.PlanOptimizer;
 import com.zifang.z.etl.core.job.RetrySpec;
 import com.zifang.z.etl.core.pipeline.PipelineParams;
@@ -190,6 +192,48 @@ public class PipelineEngine {
     /** 水位记录（断点续传的「读到哪了」）；没有返回 {@code null}。 */
     public Checkpoint watermark(String name) {
         return checkpointStore == null ? null : checkpointStore.load(name);
+    }
+
+    /**
+     * 导出保存点（纯读，不动现场）。
+     *
+     * <p>保存点 = 键控状态快照 + 水位游标打包成一个自描述 JSON 报文，
+     * 可以搬去别的环境灌回（可换名）。空管道（状态与水位都没有）导不出。
+     *
+     * @param name 流水线名
+     * @return 保存点
+     */
+    public Savepoint exportSavepoint(String name) {
+        requirePipeline(name);
+        return Savepoints.export(name, stateStore, checkpointStore);
+    }
+
+    /**
+     * 灌回保存点（覆盖写；目标名取报文里的导出名）。
+     *
+     * @param savepointJson 保存点 JSON 文本
+     */
+    public void importSavepoint(String savepointJson) throws Exception {
+        Savepoint savepoint = Savepoints.fromJson(savepointJson);
+        Savepoints.apply(savepoint, savepoint.getPipeline(), stateStore, checkpointStore);
+    }
+
+    /**
+     * 灌回保存点（覆盖写，换名迁移：灌到 {@code targetName} 名下）。
+     *
+     * @param savepointJson 保存点 JSON 文本
+     * @param targetName    目标流水线名
+     */
+    public void importSavepoint(String savepointJson, String targetName) throws Exception {
+        Savepoint savepoint = Savepoints.fromJson(savepointJson);
+        Savepoints.apply(savepoint, targetName, stateStore, checkpointStore);
+    }
+
+    private void requirePipeline(String name) {
+        if (repository.find(name) == null) {
+            throw new IllegalArgumentException("流水线不存在: " + name
+                    + "（已登记: " + String.join(", ", repository.listNames()) + "）");
+        }
     }
 
     /** 运行履历（新→旧）。 */

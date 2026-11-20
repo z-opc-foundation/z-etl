@@ -379,6 +379,22 @@ trial.getRecordsWritten();   // 「试跑下来会写多少行」，不是真写
 - 最多处理 N 行（`?rows=100`）；源行数不足就跑完为止；
 - 试跑**从全量跑**（不读水位 ⇒ 可预测：「第一次跑会是什么样」）。
 
+### 保存点（savepoint：作业迁移）
+
+口径照抄 Flink：把**键控状态快照 + 水位游标**打包成自描述 JSON 报文，搬去别的环境灌回（可换名）——A 环境跑到一半 → 导出 → B 环境灌回 → B 直接增量续跑：
+
+```java
+Savepoint sp = engine.exportSavepoint("daily-orders");   // 纯读，不动现场
+String json = Savepoints.toJson(sp);
+engineB.importSavepoint(json);            // 灌回同名管道（覆盖写）
+engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
+```
+
+- 报文自带版本号（当前 v1）+ 导出名 + 导出时间，`fromJson` 校验版本与基本形状，坏报文明确拒绝；
+- **导出纯读**（状态与水位纹丝不动），**灌回覆盖写**（目标管道原有的状态与水位被替换）；
+- 空管道（状态与水位都没有）导不出；无状态管道可以只搬水位；
+- REST：`GET /api/etl/pipelines/{name}/savepoint` 导出、`POST .../savepoint/import` 灌回（body 可带 `targetName` 换名）。
+
 ### 执行语义（与 Flink 对齐的部分）
 
 | 语义 | 口径 |
@@ -460,6 +476,8 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 | GET | `/api/etl/pipelines/{name}/plan` | 计划解释（拓扑序文本计划 + 优化备注，text/plain） |
 | POST | `/api/etl/pipelines/{name}/run` | 触发流水线（body 可选 = 运行参数，如 `{"bizdate": "2026-11-19"}`） |
 | POST | `/api/etl/pipelines/{name}/dry-run` | **试跑**（`?rows=100`：最多处理 N 行收工；汇只计数不落地；不读不写水位与状态快照；body 可选 = 运行参数） |
+| GET | `/api/etl/pipelines/{name}/savepoint` | **导出保存点**（键控状态快照 + 水位游标打包成自描述 JSON；纯读不动现场） |
+| POST | `/api/etl/pipelines/{name}/savepoint/import` | **灌回保存点**（覆盖写；body 可带 `targetName` 换名迁移） |
 | GET | `/api/etl/pipelines/{name}/watermark` | 水位记录 |
 | GET | `/api/etl/pipelines/{name}/runs` | 运行履历 |
 | POST | `/api/etl/pipelines/{name}/schedule` | 登记调度（body = cron 表达式） |
@@ -493,7 +511,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 135 个用例（core 132 + web 3）
+mvn -o test              # 140 个用例（core 137 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -1,6 +1,7 @@
 package com.zifang.z.etl.web.api;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
+import com.zifang.z.etl.core.checkpoint.Savepoint;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.engine.PipelineSchedule;
 import com.zifang.z.etl.core.runtime.PipelineRunResult;
@@ -34,6 +35,8 @@ import java.util.Map;
  * GET  /api/etl/pipelines/{name}/watermark 水位记录
  * GET  /api/etl/pipelines/{name}/runs      运行履历
  * POST /api/etl/pipelines/{name}/dry-run   试跑（跑 rows 行不落地）
+ * GET  /api/etl/pipelines/{name}/savepoint 导出保存点（状态快照 + 水位游标）
+ * POST /api/etl/pipelines/{name}/savepoint/import 灌回保存点（覆盖写，可换名迁移）
  * POST /api/etl/pipelines/{name}/schedule  登记调度（body = cron 表达式）
  * GET  /api/etl/pipelines/{name}/schedule  调度登记（含下一次触发时间）
  * DELETE /api/etl/pipelines/{name}/schedule 取消调度
@@ -124,6 +127,30 @@ public class EtlPipelineController {
             description = "运行参数（声明里 ${name} 占位符的取值）",
             position = BizParam.Position.BODY) Map<String, String> params) throws Exception {
         return service.dryRun(name, params, rows);
+    }
+
+    /**
+     * 导出保存点（纯读，不动现场）。
+     */
+    @GetMapping("/{name}/savepoint")
+    @BizApi(summary = "导出保存点", description = "导出保存点：键控状态快照 + 水位游标打包成自描述 JSON 报文；导出纯读，不动现场。", tags = {"z-etl"})
+    public Savepoint exportSavepoint(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "流水线名", position = BizParam.Position.PATH) String name) {
+        return service.exportSavepoint(name);
+    }
+
+    /**
+     * 灌回保存点（覆盖写；可选换名迁移）。
+     */
+    @PostMapping("/{name}/savepoint/import")
+    @BizApi(summary = "灌回保存点", description = "把保存点 JSON 灌回该流水线（覆盖写；body 可带 {\"targetName\": \"新名\"} 换名迁移）。", tags = {"z-etl"})
+    public Map<String, Object> importSavepoint(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "目标流水线名（不带 targetName 时取报文里的导出名）",
+            position = BizParam.Position.PATH) String name,
+            @RequestBody @BizParam(name = "savepoint", type = BizField.FieldType.JSON,
+            description = "保存点报文（导出接口的 JSON 原文），或 {\"savepoint\": {...}, \"targetName\": \"新名\"}",
+            position = BizParam.Position.BODY) Map<String, Object> body) throws Exception {
+        return service.importSavepoint(name, body);
     }
 
     /**

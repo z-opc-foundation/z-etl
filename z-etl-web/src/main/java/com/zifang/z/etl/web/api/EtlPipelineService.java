@@ -1,12 +1,15 @@
 package com.zifang.z.etl.web.api;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
+import com.zifang.z.etl.core.checkpoint.Savepoint;
+import com.zifang.z.etl.core.checkpoint.Savepoints;
 import com.zifang.z.etl.core.engine.PipelineEngine;
 import com.zifang.z.etl.core.engine.PipelineSchedule;
 import com.zifang.z.etl.core.runtime.PipelineRunResult;
 import com.zifang.z.meta.api.annotation.BizMethod;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -122,6 +125,52 @@ public class EtlPipelineService {
      */
     public PipelineRunResult dryRun(String name, Map<String, String> params, long sampleRows) throws Exception {
         return pipelineEngine.dryRun(name, params, sampleRows);
+    }
+
+    /**
+     * 导出保存点（纯读，不动现场）。
+     */
+    @BizMethod(name = "导出保存点", module = "z-etl", description = "键控状态快照 + 水位游标打包成自描述 JSON 报文；导出纯读。", operation = BizMethod.Operation.QUERY)
+    public Savepoint exportSavepoint(String name) {
+        return pipelineEngine.exportSavepoint(name);
+    }
+
+    /**
+     * 灌回保存点（覆盖写；body = 保存点 JSON 或 {savepoint, targetName} 换名迁移）。
+     */
+    @BizMethod(name = "灌回保存点", module = "z-etl", description = "把保存点灌回流水线（覆盖写状态与水位；可换名迁移）。", operation = BizMethod.Operation.ACTION)
+    public Map<String, Object> importSavepoint(String name, Map<String, Object> body) throws Exception {
+        String json = Savepoints.toJson(readSavepoint(name, body));
+        String target = targetName(name, body);
+        if (target.equals(name)) {
+            pipelineEngine.importSavepoint(json);
+        } else {
+            pipelineEngine.importSavepoint(json, target);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("target", target);
+        result.put("restored", true);
+        return result;
+    }
+
+    /** body 形状：直接是保存点报文，或包一层 {savepoint: {...}, targetName: "新名"}。 */
+    private Savepoint readSavepoint(String name, Map<String, Object> body) throws Exception {
+        if (body == null || body.isEmpty()) {
+            throw new IllegalArgumentException("body 应为保存点报文或 {savepoint, targetName}");
+        }
+        Object savepoint = body.containsKey("savepoint") ? body.get("savepoint") : body;
+        Savepoint parsed = com.zifang.z.etl.core.checkpoint.Savepoints.fromJson(
+                new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(savepoint));
+        if (!name.equals(parsed.getPipeline()) && !body.containsKey("targetName")) {
+            // 报文里的导出名与路径名不一致且没点名 target ⇒ 以路径名为准（防灌错管道）
+            parsed.setPipeline(name);
+        }
+        return parsed;
+    }
+
+    private String targetName(String name, Map<String, Object> body) {
+        Object target = body == null ? null : body.get("targetName");
+        return target == null || String.valueOf(target).trim().isEmpty() ? name : String.valueOf(target).trim();
     }
 
     /**

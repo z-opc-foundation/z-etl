@@ -118,6 +118,16 @@ public final class PipelineValidator {
                             + " 必须声明 config.name（要引用的管道名）");
                 }
             }
+            if (type == OperatorType.ASYNC_MAP) {
+                String url = node.string("url");
+                if (url == null || url.trim().isEmpty()) {
+                    throw new IllegalArgumentException("async.map 节点 " + node.getId() + " 必须声明 config.url");
+                }
+                if (node.integer("capacity", 100) < 1) {
+                    throw new IllegalArgumentException("async.map 节点 " + node.getId()
+                            + " 的 capacity 至少为 1");
+                }
+            }
             if (type == OperatorType.CEP_PATTERN) {
                 if (node.mapList("steps").isEmpty()) {
                     throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()

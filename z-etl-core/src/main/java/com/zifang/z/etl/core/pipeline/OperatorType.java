@@ -49,6 +49,9 @@ public enum OperatorType {
     /** 自由脚本（z-script 沙箱；可产出一列或整行）。 */
     SCRIPT("script", Kind.TRANSFORM),
 
+    /** 异步映射（每行异步外呼 HTTP 补列；容量背压 + 有序/乱序产出；Flink AsyncFunction 口径）。 */
+    ASYNC_MAP("async.map", Kind.TRANSFORM),
+
     /** 字段映射（源列 → 目标列 + 落库类型）。 */
     FIELD_MAPPING("field.mapping", Kind.TRANSFORM),
 
@@ -245,6 +248,10 @@ public enum OperatorType {
         if ("cep".equals(normalized) || "pattern".equals(normalized)
                 || "pattern.match".equals(normalized) || "pattern.detect".equals(normalized)) {
             return CEP_PATTERN;
+        }
+        if ("async".equals(normalized) || "async.http".equals(normalized)
+                || "http.async".equals(normalized) || "http.lookup".equals(normalized)) {
+            return ASYNC_MAP;
         }
         // 输出类型别名
         if ("csv.sink".equals(normalized) || "file.csv.out".equals(normalized)) {

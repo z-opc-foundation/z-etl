@@ -11,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.Set;
 
 /**
@@ -148,6 +150,9 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
         return ColumnNeed.of(sources);
     }
 
+    /** url 模板里的 {@code {列名}} 占位符（与 async.map 同口径）。 */
+    private static final Pattern TEMPLATE_COLUMN = Pattern.compile("\\{([A-Za-z0-9_]+)\\}");
+
     /** 算子自身需要的列（表达式 / 脚本引用、键列、聚合列、归一列）。 */
     private Set<String> operatorColumns(PipelineNode node) {
         Set<String> columns = new LinkedHashSet<String>();
@@ -180,6 +185,13 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
             for (String column : node.strings("unique")) {
                 columns.add(ColumnReferences.normalize(column));
             }
+        } else if (type == OperatorType.ASYNC_MAP) {
+            // url 模板里的 {列名} 与 body 列都得活着传到它那儿
+            Matcher template = TEMPLATE_COLUMN.matcher(node.string("url") == null ? "" : node.string("url"));
+            while (template.find()) {
+                columns.add(template.group(1));
+            }
+            columns.addAll(node.strings("bodyColumns"));
         } else if (type == OperatorType.DEDUP
                 || type == OperatorType.AGGREGATE
                 || type == OperatorType.WINDOW_AGGREGATE) {

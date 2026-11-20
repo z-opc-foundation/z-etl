@@ -283,6 +283,7 @@ edges:
 | `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
 | `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
 | `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
+| `async.map` | 变换 | **异步映射**（Flink AsyncFunction 口径）：每行异步外呼 HTTP 补列；`capacity` 容量背压（在途满阻塞等一个）、`outputMode` ordered/unordered、流结束 flush 把在途全发出；`onError` fail/skip | `url({列}模板)/method/headers/bodyColumns/fields/timeoutMs/capacity/outputMode/onError/allowedHosts` |
 | `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
 | `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
 | `assert` | 变换 | **数据质量闸**：逐行判定 + 流结束结算；违规可失败 / 走旁路 / 只计数 | `mode/rejectedTo/expression/engine/inRange/allowedValues/notNullRate/unique/minRows/maxRows/exactRows` |
@@ -409,6 +410,7 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 | 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
 | 区间连接 | `interval.join`：两边都缓存，事件时间相差 ≤ `within` 的行按关联键两两配对（后到触发，每对只发一次）；水位 − within 之前的缓存清掉；没事件时间的行丢弃并计数 |
 | 模式匹配 | `cep.pattern`：能延续旧匹配就延续、能开新匹配就开新匹配（同一事件两件事都做）；**推进即取代**（不做跳跃策略细分）；最后一步次数到下限即产出；`within` 声明后起步早于「水位 − within」的部分匹配清掉；每键部分匹配上限（缺省 64）防爆炸 |
+| 异步 IO | `async.map`：Flink AsyncFunction 口径 —— 请求并发在途，行到达时先发已完成的、在途到 `capacity` 才阻塞等一个（容量背压）；`ordered` 按行到达序 / `unordered` 完成即发；流结束 `flush(Output)`（endOfInput）把在途全部发出；失败缺省 fail fast，`onError: skip` 丢行并计数 |
 | 状态快照 | 跑完把全部键控状态序列化存进 `PipelineStateStore`（内存 / JDBC 落库），下轮恢复 |
 | 断点续传 | 复用线性作业的水位游标（复合游标 + 回溯窗口），跑完落 `Checkpoint`，下轮从水位接力 |
 | 模式 | `auto`（有快照/水位续跑，否则全量）/ `init`（清掉重跑）/ `incremental`（无水位直接失败） |
@@ -515,7 +517,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 157 个用例（core 154 + web 3）
+mvn -o test              # 164 个用例（core 161 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -110,6 +110,8 @@ public final class OperatorFactory {
                 return new MapOperator(node, sandbox);
             case SCRIPT:
                 return new ScriptOperator(node, sandbox);
+            case ASYNC_MAP:
+                return new AsyncMapOperator(node);
             case FIELD_MAPPING:
                 return new FieldMappingOperator(node);
             case TYPE_NORMALIZE:

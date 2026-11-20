@@ -319,6 +319,11 @@ public class PipelineExecutor {
             // —— 流结束：水位推到最大 ⇒ 全部窗口结算 ——
             propagateWatermark(Long.MAX_VALUE, topo);
 
+            // —— 流结束刷余：在途算子（异步 IO 等）把攒着的产出全发出去 ——
+            for (String id : topo) {
+                operators.get(id).flush(nodeOutputs.get(id));
+            }
+
             // —— 收尾：关算子（汇刷批）——
             for (int i = closables.size() - 1; i >= 0; i--) {
                 closables.get(i).close();

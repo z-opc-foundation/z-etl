@@ -63,6 +63,18 @@ public interface Operator extends AutoCloseable {
     void onTimer(long timestamp, String timerName) throws Exception;
 
     /**
+     * 流结束刷余（Flink 的 {@code endOfInput} 口径）：源全部结束后、{@link #close} 之前调用。
+     *
+     * <p>有在途处理的算子（异步 IO 等）在这里把攒着的产出**全部发出去**；
+     * 无在途的算子用默认空实现。
+     *
+     * @param output 输出口
+     * @throws Exception 刷余失败
+     */
+    default void flush(Output output) throws Exception {
+    }
+
+    /**
      * 关闭（刷批、关连接）。
      *
      * @throws Exception 关闭失败

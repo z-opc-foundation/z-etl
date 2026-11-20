@@ -22,6 +22,18 @@ public interface PlanRewriter {
     String name();
 
     /**
+     * 优化前的上下文注入（默认无操作）。
+     *
+     * <p>需要表结构才能安全改写的规则（聚合下推）靠它拿到 {@link TableSchemaResolver}；
+     * 拿不到就按「不知道」保守处理。
+     *
+     * @param resolver 表结构解析（可为 {@code null}）
+     */
+    default void prepare(TableSchemaResolver resolver) {
+        // 默认不需要上下文
+    }
+
+    /**
      * 改写计划。
      *
      * @param spec 原声明

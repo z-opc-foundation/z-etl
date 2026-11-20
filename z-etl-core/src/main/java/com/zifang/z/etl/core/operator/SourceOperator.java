@@ -1,6 +1,8 @@
 package com.zifang.z.etl.core.operator;
 
 import com.zifang.z.etl.core.connector.AbstractPullSource;
+import com.zifang.z.etl.core.job.AggregateSpec;
+import com.zifang.z.etl.core.job.PushdownSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
 import com.zifang.z.etl.core.reader.JdbcRowReader;
@@ -59,6 +61,7 @@ public class SourceOperator extends AbstractPullSource {
         spec.setOrderBy(node.string("orderBy"));
         spec.setPageSize(node.integer("pageSize", 500));
         spec.setWatermarkColumn(node.string("eventTimeColumn"));
+        spec.setPushdown(pushdown(node));
 
         Map<String, Object> resume = node.map("resume");
         String resumeColumn = MapOperator.text(resume.get("column"));
@@ -71,6 +74,55 @@ public class SourceOperator extends AbstractPullSource {
                 tiebreakColumn, resumeTiebreak, overlap);
         buffer = new ArrayList<Map<String, Object>>();
         bufferIndex = 0;
+    }
+
+    /**
+     * 节点的 {@code pushdown} 配置 → {@link PushdownSpec}（过滤 / 分组 / 聚合下推）。
+     *
+     * @param node 源节点
+     * @return 下推声明；没声明返回 {@code null}
+     */
+    private static PushdownSpec pushdown(PipelineNode node) {
+        Map<String, Object> config = node.map("pushdown");
+        if (config.isEmpty()) {
+            return null;
+        }
+        PushdownSpec pushdown = new PushdownSpec();
+        pushdown.setFilter(MapOperator.text(config.get("filter")));
+        List<String> groupBy = new ArrayList<String>();
+        Object groupByRaw = config.get("groupBy");
+        if (groupByRaw instanceof List) {
+            for (Object item : (List<?>) groupByRaw) {
+                String text = MapOperator.text(item);
+                if (text != null) {
+                    groupBy.add(text);
+                }
+            }
+        }
+        pushdown.setGroupBy(groupBy);
+        List<AggregateSpec> aggregates = new ArrayList<AggregateSpec>();
+        Object aggregatesRaw = config.get("aggregates");
+        if (aggregatesRaw instanceof List) {
+            for (Object raw : (List<?>) aggregatesRaw) {
+                if (!(raw instanceof Map)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> item = (Map<String, Object>) raw;
+                AggregateSpec aggregate = new AggregateSpec();
+                String fn = MapOperator.text(item.get("fn"));
+                aggregate.setFunction(fn == null ? MapOperator.text(item.get("function")) : fn);
+                aggregate.setColumn(MapOperator.text(item.get("column")));
+                aggregate.setAlias(MapOperator.text(item.get("alias")));
+                aggregates.add(aggregate);
+            }
+        }
+        pushdown.setAggregates(aggregates);
+        Object distinct = config.get("distinct");
+        if (distinct != null) {
+            pushdown.setDistinct(Boolean.valueOf(String.valueOf(distinct)));
+        }
+        return pushdown;
     }
 
     @Override

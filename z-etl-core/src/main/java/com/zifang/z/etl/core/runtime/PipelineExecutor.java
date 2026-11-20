@@ -4,6 +4,7 @@ import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.checkpoint.WatermarkCursor;
 import com.zifang.z.etl.core.operator.OperatorFactory;
+import com.zifang.z.etl.core.optimize.JdbcTableSchemaResolver;
 import com.zifang.z.etl.core.optimize.PlanOptimizer;
 import com.zifang.z.etl.core.pipeline.PipelineEdge;
 import com.zifang.z.etl.core.pipeline.PipelineParser;
@@ -125,9 +126,11 @@ public class PipelineExecutor {
     public PipelineRunResult execute(PipelineSpec spec,
                                      Map<String, com.zifang.z.etl.core.runtime.Operator> operatorCapture) throws Exception {
         long start = System.currentTimeMillis();
-        // —— 计划优化（过滤下推 / 投影下推 / 合并映射 / 摘死节点）——
+        // —— 计划优化（过滤下推 / 投影下推 / 聚合下推 / 合并映射 / 摘死节点）——
         // 优化会改写声明 ⇒ 先深拷贝一份，别把调用方的对象改了
-        PlanOptimizer.Optimized optimized = new PlanOptimizer().optimize(PipelineParser.copyOf(spec));
+        // 表结构解析交给优化器：依赖列集合的规则（聚合下推）要靠它判定「下游引用的列还在不在」
+        PlanOptimizer.Optimized optimized = new PlanOptimizer().optimize(
+                PipelineParser.copyOf(spec), new JdbcTableSchemaResolver(dataSourceProvider));
         PipelineSpec plan = optimized.spec();
         PipelineValidator.validate(plan);
 

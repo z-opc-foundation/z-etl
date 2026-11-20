@@ -180,6 +180,17 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
 
     /** 收窄源节点的列清单。 */
     private void narrowSource(PipelineNode node, ColumnNeed needed, List<String> notes) {
+        Map<String, Object> pushdown = node.map("pushdown");
+        Object groupBy = pushdown.get("groupBy");
+        Object aggregates = pushdown.get("aggregates");
+        boolean aggregatePushdown = (groupBy instanceof List && !((List<?>) groupBy).isEmpty())
+                || (aggregates instanceof List && !((List<?>) aggregates).isEmpty());
+        if (aggregatePushdown) {
+            // 聚合下推的 SELECT 列表由 GROUP BY + 聚合表达式决定 ⇒ 列裁剪不适用
+            notes.add("[" + name() + "] 源节点 " + node.getId()
+                    + " 声明了聚合下推（SELECT 列表由 GROUP BY 决定），不裁剪投影");
+            return;
+        }
         List<String> declared = node.strings("columns");
         if (declared.isEmpty()) {
             notes.add("[" + name() + "] 源节点 " + node.getId()

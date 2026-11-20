@@ -16,6 +16,7 @@ import java.util.Map;
  * <ol>
  *   <li>{@link PushDownFilterRewriter}：SQL 谓词推回源库 WHERE；</li>
  *   <li>{@link ProjectionPushdownRewriter}：下游用得上的列回推到源库 SELECT 列表；</li>
+ *   <li>{@link AggregatePushdownRewriter}：源声明了 GROUP BY 聚合下推 ⇒ 摘掉引擎侧重复的 aggregate 节点；</li>
  *   <li>{@link MergeMapRewriter}：相邻 map 合一；</li>
  *   <li>{@link EliminateUnusedRewriter}：摘除到不了汇的死节点。</li>
  * </ol>
@@ -33,6 +34,7 @@ public class PlanOptimizer {
     public PlanOptimizer() {
         rewriters.add(new PushDownFilterRewriter());
         rewriters.add(new ProjectionPushdownRewriter());
+        rewriters.add(new AggregatePushdownRewriter());
         rewriters.add(new MergeMapRewriter());
         rewriters.add(new EliminateUnusedRewriter());
     }
@@ -70,9 +72,21 @@ public class PlanOptimizer {
      * @return 优化结果
      */
     public Optimized optimize(PipelineSpec spec) {
+        return optimize(spec, null);
+    }
+
+    /**
+     * 优化一条声明（带表结构解析）。
+     *
+     * @param spec     原声明
+     * @param resolver 表结构解析（可为 {@code null} ⇒ 依赖表结构的规则按「不知道」保守处理）
+     * @return 优化结果
+     */
+    public Optimized optimize(PipelineSpec spec, TableSchemaResolver resolver) {
         List<String> notes = new ArrayList<String>();
         PipelineSpec current = spec;
         for (PlanRewriter rewriter : rewriters) {
+            rewriter.prepare(resolver);
             current = rewriter.rewrite(current, notes);
         }
         return new Optimized(current, notes);

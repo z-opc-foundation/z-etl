@@ -1,5 +1,8 @@
 package com.zifang.z.etl.core.pipeline;
 
+import com.zifang.z.etl.core.job.AggregateSpec;
+import com.zifang.util.db.support.Identifiers;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -101,6 +104,13 @@ public final class PipelineValidator {
                     throw new IllegalArgumentException("汇节点 " + node.getId() + " 不允许有出边");
                 }
             }
+            if (type == OperatorType.JDBC_SOURCE) {
+                List<String> pushdownErrors = checkSourcePushdown(node);
+                if (!pushdownErrors.isEmpty()) {
+                    throw new IllegalArgumentException("流水线 " + spec.getName() + " 的源节点 "
+                            + node.getId() + " 下推声明不合法: " + String.join("; ", pushdownErrors));
+                }
+            }
             if (type == OperatorType.JOIN) {
                 if (in.size() != 2) {
                     throw new IllegalArgumentException("join 节点 " + node.getId() + " 必须正好两条入边，实际 " + in.size());
@@ -123,6 +133,96 @@ public final class PipelineValidator {
         }
 
         topologicalOrder(spec, index);
+    }
+
+    /**
+     * 源节点的下推声明校验（过滤 / 分组 / 聚合）。
+     *
+     * <p>纪律：聚合表达式**不是**自由 SQL，而是「函数白名单 + 列名白名单」的组合
+     * （与线性层 {@code AggregateSpec} 同口径）—— 聚合表达式无法参数绑定，拼文本就是注入面。
+     */
+    private static List<String> checkSourcePushdown(PipelineNode node) {
+        List<String> errors = new ArrayList<String>();
+        Map<String, Object> pushdown = node.map("pushdown");
+        if (pushdown.isEmpty()) {
+            return errors;
+        }
+        List<String> groupBy = new ArrayList<String>();
+        Object groupByRaw = pushdown.get("groupBy");
+        if (groupByRaw instanceof List) {
+            for (Object item : (List<?>) groupByRaw) {
+                String column = text(item);
+                if (column != null) {
+                    groupBy.add(column);
+                }
+            }
+        }
+        for (String column : groupBy) {
+            if (!Identifiers.isSafe(column)) {
+                errors.add("节点 " + node.getId() + " 的 pushdown.groupBy 含非法列标识符: " + column);
+            }
+        }
+        List<Map<String, Object>> aggregates = new ArrayList<Map<String, Object>>();
+        Object aggregatesRaw = pushdown.get("aggregates");
+        if (aggregatesRaw instanceof List) {
+            for (Object item : (List<?>) aggregatesRaw) {
+                if (item instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) item;
+                    aggregates.add(map);
+                }
+            }
+        }
+        for (Map<String, Object> item : aggregates) {
+            String fn = text(item.get("fn"));
+            if (fn == null) {
+                fn = text(item.get("function"));
+            }
+            String column = text(item.get("column"));
+            String alias = text(item.get("alias"));
+            if (fn == null) {
+                errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 缺少 fn");
+                continue;
+            }
+            boolean allowed = false;
+            for (String safe : AggregateSpec.SAFE_FUNCTIONS) {
+                if (safe.equalsIgnoreCase(fn.trim())) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed) {
+                errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 聚合函数不支持: " + fn
+                        + "（SQL 下推可用: " + String.join("/", AggregateSpec.SAFE_FUNCTIONS) + "）");
+            }
+            if (column == null || "*".equals(column.trim())) {
+                if (!"*".equals(column == null ? "" : column.trim())) {
+                    errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 缺聚合列");
+                } else if (!"COUNT".equalsIgnoreCase(fn.trim())) {
+                    errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 只有 COUNT 允许 *");
+                }
+            } else if (!Identifiers.isSafe(column)) {
+                errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 含非法列标识符: " + column);
+            }
+            if (alias != null && !Identifiers.isSafe(alias)) {
+                errors.add("节点 " + node.getId() + " 的 pushdown.aggregates 含非法别名: " + alias);
+            }
+        }
+        boolean aggregatePushdown = !groupBy.isEmpty() || !aggregates.isEmpty();
+        if (aggregatePushdown && node.string("eventTimeColumn") != null) {
+            errors.add("节点 " + node.getId() + " 不能同时声明聚合下推与 eventTimeColumn"
+                    + "（聚合结果是分组口径，水位过滤对它没有意义）");
+        }
+        return errors;
+    }
+
+    /** 取文本（空串 → null）。 */
+    private static String text(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
     }
 
     /**

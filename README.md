@@ -22,7 +22,7 @@ z-etl/
 │       ├── runtime/           流式执行内核（Record/Operator/StateBackend/TimerService/水位 + PipelineExecutor）
 │       ├── operator/          算子集（source/filter/map/script/aggregate/window.aggregate/dedup/join/union/sinks）
 │       ├── connector/         连接器（文件 CSV/JSON/XLSX、HTTP、内联、脚本、消息 + PullSource 骨架 + 类型推断；线性层与 DAG 层共用）
-│       ├── optimize/          计划优化器（过滤下推 / 合并映射 / 死节点摘除 + explain()）
+│       ├── optimize/          计划优化器（过滤下推 / 投影下推 / 聚合下推 / 合并映射 / 死节点摘除 + explain()）
 │       ├── spi/               DataSourceProvider（数据源解析 SPI）+ MessageBus（消息总线 SPI）
 │       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推 + 流式拉取 fetchNextPage）
 │       ├── transform/         变换链（字段映射 → 行级表达式 → 脚本沙箱 → 类型归一）—— 线性作业用
@@ -270,7 +270,7 @@ edges:
 
 | 类型串 | 族 | 干什么 | 关键 config |
 |---|---|---|---|
-| `jdbc.source` | 源 | 分页游标拉数 + SQL 下推 + 事件时间水位 + 复合游标断点续传 | `table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume` |
+| `jdbc.source` | 源 | 分页游标拉数 + SQL 下推 + 事件时间水位 + 复合游标断点续传 | `table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume/pushdown` |
 | `file.csv.source` | 源 | CSV 文件（表头 / 分隔符 / 引号可配；未声明列类型按内容推断） | `path/delimiter/quote/header/encoding/columns/columnTypes/skipRows/limit/eventTimeColumn` |
 | `file.json.source` | 源 | JSON 文件（`ndjson` 一行一个 / `json` 数组；`itemPath` 定位数组） | `path/format/itemPath/columns/columnTypes/encoding/eventTimeColumn` |
 | `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX；日期样式还原成 Timestamp） | `path/sheet/header/columns/columnTypes` |
@@ -332,6 +332,7 @@ Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_messa
 | `MergeMapRewriter` | 相邻两个 `map` 并成一个（列清单合并，语义等价：表达式都在累积行上求值） | 上游有扇出/扇入不并 |
 | `EliminateUnusedRewriter` | 到不了任何汇的死节点摘掉 | `rejectedTo` 指名的节点不算死 |
 | `ProjectionPushdownRewriter` | 下游用得上的列回推到源库 SELECT 列表 | 只对 `jdbc.source` 生效；源必须**已声明列清单**；链上必须有 `field.mapping` 收敛输出列；**水位列 / 平局列必保**；join / 整行脚本 / 多路异构合并不裁 |
+| `AggregatePushdownRewriter` | 源声明了 `pushdown.groupBy/aggregates` ⇒ 摘掉引擎侧重复计算的 `aggregate` 节点 | 下推**必须用户在源上显式声明**；聚合声明要与节点**逐条一致**（分组列集合 + fn/column/alias）；**下游列守卫**：下游用到的列必须都在「分组列 + 聚合别名」里，否则不摘；聚合下推与 `eventTimeColumn` **互斥** |
 
 **投影下推的保守边界**（错了就是静默丢数据，所以逐条设卡）：
 1. 只对 `jdbc.source` 生效 —— SQL 投影是确定的；文件 / HTTP / 消息源的 `columns` 语义各不相同，不碰；
@@ -341,7 +342,16 @@ Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_messa
 5. `join` / `script(mode=row)` / 多路异构合并 ⇒ 列集合不可知，不裁；
 6. 表达式 / 脚本里的列引用按**候选**提取（不排除关键字），最终与源声明列求交 ⇒ 误判只会多留一列，不会少留。
 
+**聚合下推的保守边界**（口径从「每条输入发一次」变成「每组一行」，错了就是静默丢数）：
+1. 下推**由用户在源节点显式声明**（`pushdown.groupBy` + `pushdown.aggregates`）—— 引擎不猜「这个聚合能不能下推」；
+2. 引擎侧 `aggregate` 节点的 `keyBy` / `aggregates` 必须与源声明**逐条一致**（分组列集合相同、fn/column/alias 相同）⇒ 不一致就保留引擎侧计算，只在备注里提示；
+3. **下游列守卫**：引擎侧 aggregate 的输出是「整行 + 聚合别名」，下推后的源只输出「分组列 + 聚合别名」⇒ 下游若引用了别的列会拿到空值。所以摘节点前要确认下游链路用到的列全在输出列集里：精确列名（`field.mapping` 的 source、汇的 `columns`/`idempotencyKey`、`keyBy`、聚合列、类型归一列）不在 ⇒ 不摘；表达式里的标识符按**源表列清单**判定（运行时用 JDBC 元数据取；取不到 ⇒ 不摘，不猜）；整行脚本 / join ⇒ 引用不可知 ⇒ 不摘；
+4. 聚合下推与 `eventTimeColumn` **互斥**（聚合结果是分组口径，水位过滤对它没意义）⇒ 声明了就报错；
+5. 聚合表达式**不是自由 SQL**：函数名走白名单（`SUM/COUNT/AVG/MIN/MAX`）、列名走标识符白名单。
+
 **运行时就会优化**：执行器跑之前先做一遍优化（改写副本，不动调用方的声明），优化备注写进运行结果。
+优化器会拿 **JDBC 元数据**里的源表列清单（`JdbcTableSchemaResolver`）来判定「下游引用的列还在不在」——
+拿不到就按「不知道」保守处理。
 计划长什么样跑之前可以看：`new PlanOptimizer().explain(spec)`（拓扑序文本计划 + 优化备注）。
 
 ### 与 z-wf 的编排分工（管道之间归流程引擎）
@@ -413,7 +423,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 93 个用例（core 90 + web 3）
+mvn -o test              # 100 个用例（core 97 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

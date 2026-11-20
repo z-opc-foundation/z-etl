@@ -53,6 +53,9 @@ import java.util.Set;
  *   <li><b>until 终止条件</b>：步骤可声明 {@code until} 表达式 —— 条件命中但 until
  *       也命中的事件<b>不吃进该步</b>（部分匹配留着等推进；比 Flink 的「until 销毁匹配」
  *       更保守：不销毁，只挡消费）；</li>
+ *   <li><b>紧邻度</b>：步骤可声明 {@code strict: true}（声明在「下一步」上，Flink 的
+ *       {@code .next()} 口径）—— 当前事件既不吃进当前步也不推进到该步 ⇒ 部分匹配死掉
+ *       （中间不许插事件；缺省宽松，插了事件照样等）；</li>
  *   <li><b>流尾封口</b>：声明了 optional 步骤的管道在流结束时（{@link #flush}）把
  *       「剩余步骤全是 optional」的部分匹配补产出（{@code flush-emitted} 计数）——
  *       等不到终态事件也别把能封口的匹配憋死；</li>
@@ -115,6 +118,7 @@ public class CepPatternOperator implements Operator {
                 throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
                         + " 的步骤 " + spec.name + " 是 optional，不能再声明 times（optional 就是 0 或 1 次）");
             }
+            spec.strict = Boolean.parseBoolean(String.valueOf(item.get("strict")));
             spec.until = item.get("until") == null ? null : String.valueOf(item.get("until")).trim();
             if (spec.until != null && spec.until.isEmpty()) {
                 spec.until = null;
@@ -250,6 +254,11 @@ public class CepPatternOperator implements Operator {
                 // 下一步是 optional 又不吃这个事件 ⇒ 跳过它，同一事件继续往下试
                 skipAndFeed(partial, target, record, eventTime, next, output);
             }
+        }
+        // 紧邻度：下一步声明了 strict，当前事件既不吃进也不推进 ⇒ 部分匹配死掉（中间不许插事件）
+        if (!advanced && !grownLast && target < steps.size() && steps.get(target).strict) {
+            context.count("strict-broken");
+            return;
         }
         // 没推进才保留原匹配（还能被后续事件推进 / 续吃）
         if (!advanced && !grownLast) {
@@ -521,7 +530,7 @@ public class CepPatternOperator implements Operator {
         return new ArrayList<Object>(partials);
     }
 
-    /** 一个步骤的声明（条件 + 次数量词 + optional + until + 求值引擎）。 */
+    /** 一个步骤的声明（条件 + 次数量词 + optional + strict + until + 求值引擎）。 */
     private static final class StepSpec {
         private String name;
         private String expression;
@@ -530,6 +539,7 @@ public class CepPatternOperator implements Operator {
         private int minTimes;
         private int maxTimes;
         private boolean optional;
+        private boolean strict;
         private String until;
         private ElEvaluator el;
         private ElEvaluator untilEl;

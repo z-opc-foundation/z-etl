@@ -294,7 +294,7 @@ edges:
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀；`leftKey`/`rightKey` 列名允许不同（按位置取值关联） | `left/right/leftKey/rightKey/joinType/rightSuffix` |
 | `interval.join` | 有状态 | **区间连接**（Flink IntervalJoin 口径）：两路按「关联键 + 事件时间之差 ≤ within」两两配对，每对只发一次；水位到期清理缓存 | `left/right/leftKey/rightKey/within/joinType/rightSuffix` |
 | `dim.join` | 有状态 | **维表关联**（Flink broadcast-state 口径）：右流即维表（同键替换**热更新**、只进状态不下传），声明 `ttl` 按水位过期陈旧条目，`select` 投影维表列 | `left/right/leftKey/rightKey/select/ttl/joinType` |
-| `cep.pattern` | 有状态 | **模式匹配**（Flink CEP 口径的保守子集）：单流步骤序列 + 次数量词（`times` 缺省 1 / `n` / `n,` / `n,m`）+ 可选步骤（`optional` 0 或 1 次，跳过/吃到两条路径都活）+ `until` 终止条件（命中的事件不吃进该步，不销毁匹配）+ `within` 时间窗（水位过期清理）+ 流尾封口（剩余步骤全 optional 的匹配在 flush 时补产出）；产出行 = 最后事件的行 + 每步 `步骤名.列` 与 `步骤名#`；每键部分匹配上限防爆炸 | `keyBy/within/maxPartials/steps: [{name,expression,times,optional,until}]` |
+| `cep.pattern` | 有状态 | **模式匹配**（Flink CEP 口径的保守子集）：单流步骤序列 + 次数量词（`times` 缺省 1 / `n` / `n,` / `n,m`）+ 可选步骤（`optional` 0 或 1 次，跳过/吃到两条路径都活）+ 紧邻度（`strict` 声明在下一步上：中间插事件匹配即死，缺省宽松）+ `until` 终止条件（命中的事件不吃进该步，不销毁匹配）+ `within` 时间窗（水位过期清理）+ 流尾封口（剩余步骤全 optional 的匹配在 flush 时补产出）；产出行 = 最后事件的行 + 每步 `步骤名.列` 与 `步骤名#`；每键部分匹配上限防爆炸 | `keyBy/within/maxPartials/steps: [{name,expression,times,optional,strict,until}]` |
 | `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
 | `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
 | `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
@@ -409,7 +409,7 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 | 键控状态 | `ValueState/ListState/MapState`（堆实现，按算子隔离，`setCurrentKey` 口径与 Flink 一致） |
 | 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
 | 区间连接 | `interval.join`：两边都缓存，事件时间相差 ≤ `within` 的行按关联键两两配对（后到触发，每对只发一次）；水位 − within 之前的缓存清掉；没事件时间的行丢弃并计数 |
-| 模式匹配 | `cep.pattern`：能延续旧匹配就延续、能开新匹配就开新匹配（同一事件两件事都做）；**推进即取代**（不做跳跃策略细分）；`optional` 步骤 0 或 1 次 —— 下一步是 optional 不吃/吃到都开「跳过」分支，两条路径都活着（宁多配不少配）；`until` 命中的事件不吃进该步（部分匹配留着等推进，不销毁）；剩余步骤全 optional 的部分匹配在流尾 flush 时补产出（`flush-emitted`）；最后一步次数到下限即产出；`within` 声明后起步早于「水位 − within」的部分匹配清掉；每键部分匹配上限（缺省 64）防爆炸 |
+| 模式匹配 | `cep.pattern`：能延续旧匹配就延续、能开新匹配就开新匹配（同一事件两件事都做）；**推进即取代**（不做跳跃策略细分）；`optional` 步骤 0 或 1 次 —— 下一步是 optional 不吃/吃到都开「跳过」分支，两条路径都活着（宁多配不少配）；`strict` 紧邻度（声明在下一步上）—— 当前事件既不吃进也不推进 ⇒ 匹配死掉，缺省宽松；`until` 命中的事件不吃进该步（部分匹配留着等推进，不销毁）；剩余步骤全 optional 的部分匹配在流尾 flush 时补产出（`flush-emitted`）；最后一步次数到下限即产出；`within` 声明后起步早于「水位 − within」的部分匹配清掉；每键部分匹配上限（缺省 64）防爆炸 |
 | 异步 IO | `async.map`：Flink AsyncFunction 口径 —— 请求并发在途，行到达时先发已完成的、在途到 `capacity` 才阻塞等一个（容量背压）；`ordered` 按行到达序 / `unordered` 完成即发；流结束 `flush(Output)`（endOfInput）把在途全部发出；失败缺省 fail fast，`onError: skip` 丢行并计数 |
 | 状态快照 | 跑完把全部键控状态序列化存进 `PipelineStateStore`（内存 / JDBC 落库），下轮恢复 |
 | 断点续传 | 复用线性作业的水位游标（复合游标 + 回溯窗口），跑完落 `Checkpoint`，下轮从水位接力 |
@@ -517,7 +517,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 177 个用例（core 174 + web 3）
+mvn -o test              # 181 个用例（core 178 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

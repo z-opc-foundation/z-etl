@@ -290,6 +290,7 @@ edges:
 | `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
 | `explode` | 变换 | **炸行**（一行拆多行，Flink SQL 的 UNNEST 口径）：数组列逐元素出一行 / 字符串按 `delimiter` 切分；标量当单元素原样过；空数组/null 缺省丢并计数（`keepEmpty: true` 保留原行）；`target` 可把元素写新列、`indexColumn` 顺带写下标 | `column/target/indexColumn/delimiter/keepEmpty` |
 | `topn` | 变换 | **截断**（按键 / 全局 Top-N，Flink Rank 的保守子集；批口径：缓存到流尾才排序产出，适合文件/有限流）：数值列按数值比、其余按字符串比、null 视为最小；同值稳定；产出行原样 | `orderBy/order/limit/keyBy` |
+| `sample` | 变换 | **采样**（按比例放行，丢数据口径）：`seed` 声明后随机采样可复现；`hashBy` 按键哈希采样同键永远同判定（同一键的行要么全留要么全丢）且天然可复现；行原样放行只计数 | `rate/seed/hashBy` |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次） | `keyBy/aggregates: [{fn,column,alias}]` |
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发；`lateTo` 把**超窗丢弃的迟到行**原样走侧输出（有去处，不只丢计数） | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/lateTo/aggregates` |
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间）；`duplicateTo` 把被挤掉的行原样走侧输出（有去处，不只丢计数） | `keyBy/keep/ttl/duplicateTo` |
@@ -519,7 +520,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 195 个用例（core 192 + web 3）
+mvn -o test              # 198 个用例（core 195 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

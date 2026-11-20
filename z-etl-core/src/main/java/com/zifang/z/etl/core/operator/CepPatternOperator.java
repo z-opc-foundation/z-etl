@@ -56,6 +56,10 @@ import java.util.Set;
  *   <li><b>紧邻度</b>：步骤可声明 {@code strict: true}（声明在「下一步」上，Flink 的
  *       {@code .next()} 口径）—— 当前事件既不吃进当前步也不推进到该步 ⇒ 部分匹配死掉
  *       （中间不许插事件；缺省宽松，插了事件照样等）；</li>
+ *   <li><b>否定步骤</b>：步骤可声明 {@code notNext: true}（Flink 的 {@code notNext()}
+ *       口径）—— 该步不消费事件；部分匹配还没越过它时，违禁事件一到匹配即死
+ *       （{@code not-broken} 计数，否定优先于续吃）；不能是第一步、不能与
+ *       times/optional 同点声明；拖在模式末尾的 notNext 到流尾 flush 才封口产出；</li>
  *   <li><b>流尾封口</b>：声明了 optional 步骤的管道在流结束时（{@link #flush}）把
  *       「剩余步骤全是 optional」的部分匹配补产出（{@code flush-emitted} 计数）——
  *       等不到终态事件也别把能封口的匹配憋死；</li>
@@ -119,6 +123,21 @@ public class CepPatternOperator implements Operator {
                         + " 的步骤 " + spec.name + " 是 optional，不能再声明 times（optional 就是 0 或 1 次）");
             }
             spec.strict = Boolean.parseBoolean(String.valueOf(item.get("strict")));
+            spec.notNext = Boolean.parseBoolean(String.valueOf(item.get("notNext")));
+            if (spec.notNext) {
+                if (steps.isEmpty()) {
+                    throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                            + " 的 notNext 步骤 " + spec.name + " 不能是第一步（否定要挂在某个正步后面）");
+                }
+                if (spec.optional) {
+                    throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                            + " 的步骤 " + spec.name + " 不能同时声明 notNext 与 optional");
+                }
+                if (spec.minTimes != 1 || spec.maxTimes != 1) {
+                    throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                            + " 的步骤 " + spec.name + " 不能同时声明 notNext 与 times（否定步不消费事件）");
+                }
+            }
             spec.until = item.get("until") == null ? null : String.valueOf(item.get("until")).trim();
             if (spec.until != null && spec.until.isEmpty()) {
                 spec.until = null;
@@ -210,6 +229,15 @@ public class CepPatternOperator implements Operator {
         StepSpec current = steps.get(partial.stepIndex);
         StepMatch currentMatch = partial.steps.get(partial.stepIndex);
         boolean grownLast = false;
+        // notNext 违禁检查：当前步之后连续的否定步，事件命中其一 ⇒ 匹配死掉（否定优先于一切）
+        int probe = partial.stepIndex + 1;
+        while (probe < steps.size() && steps.get(probe).notNext) {
+            if (matches(steps.get(probe), record.row())) {
+                context.count("not-broken");
+                return;
+            }
+            probe++;
+        }
         // 同级续吃：次数还没封顶、条件又命中、until 又没拦
         if (currentMatch.rows.size() < current.maxTimes
                 && matches(current, record.row()) && !untilFired(current, record.row(), "续吃")) {
@@ -225,15 +253,21 @@ public class CepPatternOperator implements Operator {
                 next.add(grown);
             }
         }
-        // 向下推进：下一步条件命中（推进即取代 —— 原匹配不再保留，避免同一步骤反复产出重复匹配）
+        // 向下推进：下一个正步条件命中（推进即取代 —— 原匹配不再保留，避免同一步骤反复产出重复匹配）
         boolean advanced = false;
-        int target = partial.stepIndex + 1;
+        int target = probe;
         if (target < steps.size()) {
             StepSpec step = steps.get(target);
             if (matches(step, record.row())) {
                 advanced = true;
                 Partial nextPartial = partial.copy();
                 nextPartial.stepIndex = target;
+                // 被越过的否定步补 0 行空位（不变式：steps.size() == stepIndex + 1）
+                for (int i = partial.stepIndex + 1; i < target; i++) {
+                    StepMatch empty = new StepMatch();
+                    empty.name = steps.get(i).name;
+                    nextPartial.steps.add(empty);
+                }
                 StepMatch created = new StepMatch();
                 created.name = step.name;
                 created.rows.add(row(record));
@@ -270,16 +304,24 @@ public class CepPatternOperator implements Operator {
     private void skipAndFeed(Partial partial, int target, Record record, long eventTime,
                              List<Partial> next, Output output) throws Exception {
         Partial skipped = partial.copy();
-        StepMatch empty = new StepMatch();
-        empty.name = steps.get(target).name;
-        skipped.steps.add(empty);
-        skipped.stepIndex = target + 1;
-        // 新的当前步也要有位子（还没吃到，先空着；不变式：steps.size() == stepIndex + 1）
-        StepMatch pending = new StepMatch();
-        pending.name = steps.get(target + 1).name;
-        skipped.steps.add(pending);
+        // 被跳过的 optional 步与其后连续的 notNext 步都补 0 行空位
+        int index = target;
+        while (index < steps.size() && (index == target || steps.get(index).notNext)) {
+            StepMatch empty = new StepMatch();
+            empty.name = steps.get(index).name;
+            skipped.steps.add(empty);
+            index++;
+        }
+        skipped.stepIndex = index;
         context.count("optional-skipped");
-        extend(skipped, record, eventTime, next, output);
+        if (index < steps.size()) {
+            // 新的当前步也要有位子（还没吃到，先空着；不变式：steps.size() == stepIndex + 1）
+            StepMatch pending = new StepMatch();
+            pending.name = steps.get(index).name;
+            skipped.steps.add(pending);
+            extend(skipped, record, eventTime, next, output);
+        }
+        // 跳到流尾（剩下全是否定步）⇒ 没有当前步可喂，交给 flush 封口（原匹配仍在，等价路径）
     }
 
     /** 用当前事件开新匹配（第一步条件命中）。 */
@@ -328,20 +370,21 @@ public class CepPatternOperator implements Operator {
     }
 
     /**
-     * 流尾封口：剩余步骤全是 optional 的部分匹配，等不到终态事件也在流结束时补产出。
+     * 流尾封口：剩余步骤全是 optional / notNext 的部分匹配，等不到终态事件也在流结束时补产出。
      *
-     * <p>只对声明了 optional 步骤的管道生效（没有 optional 就没有「跳着等」的匹配可封）。
+     * <p>只对声明了 optional / notNext 步骤的管道生效（没有这两种就没有「跳着等」的匹配可封）；
+     * 拖在模式末尾的 notNext 也靠这里确认「到流尾都没等到违禁事件」后才产出。
      */
     @Override
     public void flush(Output output) {
-        boolean anyOptional = false;
+        boolean anySealable = false;
         for (StepSpec step : steps) {
-            if (step.optional) {
-                anyOptional = true;
+            if (step.optional || step.notNext) {
+                anySealable = true;
                 break;
             }
         }
-        if (!anyOptional) {
+        if (!anySealable) {
             return;
         }
         StateBackend.KeyedStateStore store = context.state();
@@ -365,13 +408,17 @@ public class CepPatternOperator implements Operator {
         }
     }
 
-    /** 能否流尾封口：还没走到最后一步，且剩余步骤全是 optional。 */
+    /** 能否流尾封口：还没走到最后一个正步之后、当前步已吃满下限、剩余步骤全是 optional 或 notNext。 */
     private boolean canFlushEmit(Partial partial) {
         if (partial.stepIndex >= steps.size() - 1) {
             return false;
         }
+        if (partial.steps.get(partial.stepIndex).rows.size() < steps.get(partial.stepIndex).minTimes) {
+            return false;
+        }
         for (int i = partial.stepIndex + 1; i < steps.size(); i++) {
-            if (!steps.get(i).optional) {
+            StepSpec step = steps.get(i);
+            if (!step.optional && !step.notNext) {
                 return false;
             }
         }
@@ -540,6 +587,7 @@ public class CepPatternOperator implements Operator {
         private int maxTimes;
         private boolean optional;
         private boolean strict;
+        private boolean notNext;
         private String until;
         private ElEvaluator el;
         private ElEvaluator untilEl;

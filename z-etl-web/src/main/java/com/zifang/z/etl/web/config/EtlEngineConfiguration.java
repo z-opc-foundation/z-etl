@@ -4,8 +4,13 @@ import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.checkpoint.JdbcCheckpointStore;
 import com.zifang.z.etl.core.engine.EtlEngine;
 import com.zifang.z.etl.core.engine.EtlSchema;
+import com.zifang.z.etl.core.engine.JdbcPipelineRepository;
 import com.zifang.z.etl.core.engine.JobRepository;
 import com.zifang.z.etl.core.engine.JdbcJobRepository;
+import com.zifang.z.etl.core.engine.PipelineEngine;
+import com.zifang.z.etl.core.engine.PipelineRepository;
+import com.zifang.z.etl.core.runtime.JdbcPipelineStateStore;
+import com.zifang.z.etl.core.runtime.PipelineStateStore;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -41,6 +46,33 @@ public class EtlEngineConfiguration {
     @Bean
     public CheckpointStore etlCheckpointStore(@Qualifier("dataSourceEtl") DataSource dataSourceEtl) {
         return new JdbcCheckpointStore(dataSourceEtl);
+    }
+
+    /**
+     * 流水线定义 / 履历仓储（落 {@code etl_pipeline_def} + {@code etl_pipeline_run}）。
+     */
+    @Bean
+    public PipelineRepository etlPipelineRepository(@Qualifier("dataSourceEtl") DataSource dataSourceEtl) {
+        return new JdbcPipelineRepository(dataSourceEtl);
+    }
+
+    /**
+     * 流水线状态快照存储（落 {@code etl_pipeline_state} ⇒ 跨重启恢复键控状态）。
+     */
+    @Bean
+    public PipelineStateStore etlPipelineStateStore(@Qualifier("dataSourceEtl") DataSource dataSourceEtl) {
+        return new JdbcPipelineStateStore(dataSourceEtl);
+    }
+
+    /**
+     * 流水线管控引擎（登记 / 触发 / 水位 / 履历 / 计划解释）。
+     */
+    @Bean
+    public PipelineEngine etlPipelineEngine(DataSourceProvider dataSourceProvider,
+                                            PipelineRepository pipelineRepository,
+                                            CheckpointStore checkpointStore,
+                                            PipelineStateStore pipelineStateStore) {
+        return new PipelineEngine(dataSourceProvider, pipelineRepository, checkpointStore, pipelineStateStore);
     }
 
     /**

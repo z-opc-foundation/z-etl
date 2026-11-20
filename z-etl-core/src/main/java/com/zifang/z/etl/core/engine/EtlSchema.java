@@ -23,6 +23,12 @@ public final class EtlSchema {
     public static final String TABLE_JOB_CHECKPOINT = "etl_job_checkpoint";
     /** 运行履历表。 */
     public static final String TABLE_JOB_RUN = "etl_job_run";
+    /** 流水线定义表（DAG 声明落库处）。 */
+    public static final String TABLE_PIPELINE_DEF = "etl_pipeline_def";
+    /** 流水线状态快照表（键控状态序列化，跨重启恢复）。 */
+    public static final String TABLE_PIPELINE_STATE = "etl_pipeline_state";
+    /** 流水线运行履历表。 */
+    public static final String TABLE_PIPELINE_RUN = "etl_pipeline_run";
 
     private static final String[] DDL = new String[]{
             "CREATE TABLE IF NOT EXISTS " + TABLE_JOB_DEF + " ("
@@ -55,6 +61,31 @@ public final class EtlSchema {
                     + "watermark_before VARCHAR(256), "
                     + "watermark_after VARCHAR(256), "
                     + "reconciled INT, "
+                    + "started_at BIGINT, "
+                    + "finished_at BIGINT)",
+            "CREATE TABLE IF NOT EXISTS " + TABLE_PIPELINE_DEF + " ("
+                    + "pipeline_name VARCHAR(128) PRIMARY KEY, "
+                    + "description VARCHAR(512), "
+                    + "mode VARCHAR(32), "
+                    + "spec_json TEXT, "
+                    + "spec_yml TEXT, "
+                    + "created_at BIGINT, "
+                    + "updated_at BIGINT)",
+            // 状态快照存 base64 文本而不是 BLOB：PG 没有 BLOB 类型名，TEXT 三方言通吃
+            "CREATE TABLE IF NOT EXISTS " + TABLE_PIPELINE_STATE + " ("
+                    + "pipeline_name VARCHAR(128) PRIMARY KEY, "
+                    + "state TEXT, "
+                    + "updated_at BIGINT)",
+            "CREATE TABLE IF NOT EXISTS " + TABLE_PIPELINE_RUN + " ("
+                    + "run_id VARCHAR(64) PRIMARY KEY, "
+                    + "pipeline_name VARCHAR(128), "
+                    + "mode VARCHAR(32), "
+                    + "records_read BIGINT, "
+                    + "records_written BIGINT, "
+                    + "watermark_before VARCHAR(256), "
+                    + "watermark_after VARCHAR(256), "
+                    + "restored INT, "
+                    + "notes TEXT, "
                     + "started_at BIGINT, "
                     + "finished_at BIGINT)"
     };

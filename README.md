@@ -254,6 +254,22 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 | GET | `/api/etl/jobs/{name}/watermark` | 水位记录 |
 | GET | `/api/etl/jobs/{name}/runs` | 运行履历 |
 
+流水线（Flink 式 DAG）管控面 —— [`EtlPipelineController`](z-etl-web/src/main/java/com/zifang/z/etl/web/api/EtlPipelineController.java)：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/etl/pipelines` | 登记流水线（body = JSON 或 yml 声明原文） |
+| GET | `/api/etl/pipelines` | 流水线名列表 |
+| GET | `/api/etl/pipelines/{name}` | 流水线定义 |
+| GET | `/api/etl/pipelines/{name}/plan` | 计划解释（拓扑序文本计划 + 优化备注，text/plain） |
+| POST | `/api/etl/pipelines/{name}/run` | 触发流水线 |
+| GET | `/api/etl/pipelines/{name}/watermark` | 水位记录 |
+| GET | `/api/etl/pipelines/{name}/runs` | 运行履历 |
+
+流水线定义落 `etl_pipeline_def`（JSON + yml 双份）；**键控状态快照**落 `etl_pipeline_state`
+（base64 TEXT，跨重启恢复 ⇒ 定时触发 / 崩溃后重跑从上次状态接力）；运行履历落 `etl_pipeline_run`。
+装配见 [`EtlEngineConfiguration`](z-etl-web/src/main/java/com/zifang/z/etl/web/config/EtlEngineConfiguration.java)。
+
 ## 运行模式（两段模式）
 
 | 声明 | 行为 |
@@ -276,12 +292,12 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 51 个用例（core 50 + web 1）
+mvn -o test              # 54 个用例（core 52 + web 2）
 ```
 
-> ⚠️ **跑测试请用 JDK 8 或 17**：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，
+> ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，
 > 在 JDK 21+ 上会因读不了高版本 class 文件而失败（`Unsupported class file major version 67`）。
-> 例：`JAVA_HOME=$(/usr/libexec/java_home -v 1.8) mvn -o test`。
+> 例：`JAVA_HOME=$(/usr/libexec/java_home -v 17) mvn -o test`。
 
 三项验收的落点与复跑命令见 [`_doc/005_testing/001_验收复跑.md`](_doc/005_testing/001_验收复跑.md)；
 转换链（D4）三项验收见 [`_doc/005_testing/002_验收复跑-转换链.md`](_doc/005_testing/002_验收复跑-转换链.md)。

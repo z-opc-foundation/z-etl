@@ -13,6 +13,27 @@ public enum OperatorType {
     /** JDBC 源（分页游标 + 事件时间 + 断点续传）。 */
     JDBC_SOURCE("jdbc.source", Kind.SOURCE),
 
+    /** CSV 文件源。 */
+    FILE_CSV_SOURCE("file.csv.source", Kind.SOURCE),
+
+    /** JSON 文件源（NDJSON / JSON 数组）。 */
+    FILE_JSON_SOURCE("file.json.source", Kind.SOURCE),
+
+    /** Excel 文件源（xlsx）。 */
+    FILE_XLSX_SOURCE("file.xlsx.source", Kind.SOURCE),
+
+    /** HTTP 接口源（REST / JSON API）。 */
+    HTTP_SOURCE("http.source", Kind.SOURCE),
+
+    /** 内联常量源（声明里写死的行）。 */
+    INLINE_SOURCE("inline.source", Kind.SOURCE),
+
+    /** 脚本源（z-script 沙箱生成数据）。 */
+    SCRIPT_SOURCE("script.source", Kind.SOURCE),
+
+    /** 消息源（Kafka / 库表队列，经 MessageBus SPI）。 */
+    MESSAGE_SOURCE("message.source", Kind.SOURCE),
+
     /** 过滤（表达式为真才放行；未命中可走旁路输出）。 */
     FILTER("filter", Kind.TRANSFORM),
 
@@ -45,6 +66,18 @@ public enum OperatorType {
 
     /** JDBC 落地（批量 upsert / insert）。 */
     JDBC_SINK("jdbc.sink", Kind.SINK),
+
+    /** CSV 文件落地。 */
+    FILE_CSV_SINK("file.csv.sink", Kind.SINK),
+
+    /** JSON 文件落地（NDJSON / JSON 数组）。 */
+    FILE_JSON_SINK("file.json.sink", Kind.SINK),
+
+    /** HTTP 接口落地（webhook / 业务 API）。 */
+    HTTP_SINK("http.sink", Kind.SINK),
+
+    /** 消息落地（Kafka / 库表队列，经 MessageBus SPI）。 */
+    MESSAGE_SINK("message.sink", Kind.SINK),
 
     /** 控制台落地（调试用；只打日志不落库）。 */
     CONSOLE_SINK("console.sink", Kind.SINK),
@@ -138,6 +171,49 @@ public enum OperatorType {
         }
         if ("types".equals(normalized) || "types.normalize".equals(normalized)) {
             return TYPE_NORMALIZE;
+        }
+        // 输入类型别名
+        if ("csv.source".equals(normalized) || "csv".equals(normalized) || "file.csv".equals(normalized)) {
+            return FILE_CSV_SOURCE;
+        }
+        if ("json.source".equals(normalized) || "ndjson.source".equals(normalized)
+                || "file.json".equals(normalized)) {
+            return FILE_JSON_SOURCE;
+        }
+        if ("xlsx.source".equals(normalized) || "excel.source".equals(normalized)
+                || "file.xlsx".equals(normalized)) {
+            return FILE_XLSX_SOURCE;
+        }
+        if ("http.source".equals(normalized) || "rest.source".equals(normalized)
+                || "http.api.source".equals(normalized)) {
+            return HTTP_SOURCE;
+        }
+        if ("inline.rows".equals(normalized) || "static.source".equals(normalized)
+                || "const.source".equals(normalized)) {
+            return INLINE_SOURCE;
+        }
+        if ("groovy.source".equals(normalized) || "script.groovy.source".equals(normalized)) {
+            return SCRIPT_SOURCE;
+        }
+        if ("mq.source".equals(normalized) || "queue.source".equals(normalized)
+                || "kafka.source".equals(normalized)) {
+            return MESSAGE_SOURCE;
+        }
+        // 输出类型别名
+        if ("csv.sink".equals(normalized) || "file.csv.out".equals(normalized)) {
+            return FILE_CSV_SINK;
+        }
+        if ("json.sink".equals(normalized) || "ndjson.sink".equals(normalized)
+                || "file.json.out".equals(normalized)) {
+            return FILE_JSON_SINK;
+        }
+        if ("http.api.sink".equals(normalized) || "webhook.sink".equals(normalized)
+                || "rest.sink".equals(normalized)) {
+            return HTTP_SINK;
+        }
+        if ("mq.sink".equals(normalized) || "queue.sink".equals(normalized)
+                || "kafka.sink".equals(normalized)) {
+            return MESSAGE_SINK;
         }
         for (OperatorType type : values()) {
             if (type.id.equals(normalized)) {

@@ -11,6 +11,7 @@ import com.zifang.z.etl.core.runtime.PipelineExecutor;
 import com.zifang.z.etl.core.runtime.PipelineRunResult;
 import com.zifang.z.etl.core.runtime.PipelineStateStore;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 
 import java.util.List;
@@ -30,13 +31,28 @@ public class PipelineEngine {
     private final PipelineRepository repository;
     private final CheckpointStore checkpointStore;
     private final PipelineStateStore stateStore;
+    private final MessageBus messageBus;
 
     public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
                           CheckpointStore checkpointStore, PipelineStateStore stateStore) {
+        this(dataSourceProvider, repository, checkpointStore, stateStore, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析
+     * @param repository          流水线定义仓储
+     * @param checkpointStore     水位游标存储
+     * @param stateStore          状态快照存储
+     * @param messageBus          消息总线（消息类源 / 汇用；可空）
+     */
+    public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
+                          CheckpointStore checkpointStore, PipelineStateStore stateStore,
+                          MessageBus messageBus) {
         this.dataSourceProvider = dataSourceProvider;
         this.repository = repository;
         this.checkpointStore = checkpointStore;
         this.stateStore = stateStore;
+        this.messageBus = messageBus;
     }
 
     /**
@@ -76,7 +92,7 @@ public class PipelineEngine {
                     + "（已登记: " + String.join(", ", repository.listNames()) + "）");
         }
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
-                new ScriptSandbox(), checkpointStore, stateStore);
+                new ScriptSandbox(), checkpointStore, stateStore, messageBus);
         PipelineRunResult result = executor.execute(spec);
         repository.saveRun(result);
         return result;

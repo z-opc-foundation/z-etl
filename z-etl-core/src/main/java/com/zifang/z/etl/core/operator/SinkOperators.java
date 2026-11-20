@@ -2,6 +2,7 @@ package com.zifang.z.etl.core.operator;
 
 import com.zifang.z.etl.core.job.TargetSpec;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
+import com.zifang.z.etl.core.runtime.CountingSink;
 import com.zifang.z.etl.core.runtime.Operator;
 import com.zifang.z.etl.core.runtime.OperatorContext;
 import com.zifang.z.etl.core.runtime.Output;
@@ -32,7 +33,7 @@ public final class SinkOperators {
     }
 
     /** JDBC 落地汇。 */
-    public static final class JdbcSink implements Operator {
+    public static final class JdbcSink implements CountingSink {
 
         private final PipelineNode node;
         private final DataSource dataSource;
@@ -85,6 +86,7 @@ public final class SinkOperators {
         }
 
         /** 已写出的行数。 */
+        @Override
         public long written() {
             return writer == null ? 0L : writer.written();
         }
@@ -96,7 +98,7 @@ public final class SinkOperators {
     }
 
     /** 控制台汇（调试用）。 */
-    public static final class ConsoleSink implements Operator {
+    public static final class ConsoleSink implements CountingSink {
 
         private final PipelineNode node;
         private long printed;
@@ -131,7 +133,8 @@ public final class SinkOperators {
             // 无资源
         }
 
-        public long printed() {
+        @Override
+        public long written() {
             return printed;
         }
 
@@ -142,7 +145,7 @@ public final class SinkOperators {
     }
 
     /** 内存收集汇（测试 / 预览用）。 */
-    public static final class CollectSink implements Operator {
+    public static final class CollectSink implements CountingSink {
 
         private final PipelineNode node;
         private final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
@@ -179,6 +182,11 @@ public final class SinkOperators {
         /** 收到的行（断言用）。 */
         public List<Map<String, Object>> rows() {
             return rows;
+        }
+
+        @Override
+        public long written() {
+            return rows.size();
         }
 
         @Override

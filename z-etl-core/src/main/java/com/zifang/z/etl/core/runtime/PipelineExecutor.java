@@ -4,13 +4,12 @@ import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.checkpoint.WatermarkCursor;
 import com.zifang.z.etl.core.operator.OperatorFactory;
-import com.zifang.z.etl.core.operator.SinkOperators;
-import com.zifang.z.etl.core.operator.SourceOperator;
 import com.zifang.z.etl.core.pipeline.PipelineEdge;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 
 import java.util.ArrayList;
@@ -42,6 +41,7 @@ public class PipelineExecutor {
     private final ScriptSandbox sandbox;
     private final CheckpointStore checkpointStore;
     private final PipelineStateStore stateStore;
+    private final MessageBus messageBus;
 
     /** 运行期建好的图（算子 id → 算子）。 */
     private final Map<String, com.zifang.z.etl.core.runtime.Operator> operators =
@@ -57,16 +57,16 @@ public class PipelineExecutor {
     private final Map<String, OperatorTimers> timers = new LinkedHashMap<String, OperatorTimers>();
 
     public PipelineExecutor(DataSourceProvider dataSourceProvider) {
-        this(dataSourceProvider, new HeapStateBackend(), new ScriptSandbox(), null, null);
+        this(dataSourceProvider, new HeapStateBackend(), new ScriptSandbox(), null, null, null);
     }
 
     public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend) {
-        this(dataSourceProvider, stateBackend, new ScriptSandbox(), null, null);
+        this(dataSourceProvider, stateBackend, new ScriptSandbox(), null, null, null);
     }
 
     public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
                             ScriptSandbox sandbox) {
-        this(dataSourceProvider, stateBackend, sandbox, null, null);
+        this(dataSourceProvider, stateBackend, sandbox, null, null, null);
     }
 
     /**
@@ -79,11 +79,26 @@ public class PipelineExecutor {
     public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
                             ScriptSandbox sandbox, CheckpointStore checkpointStore,
                             PipelineStateStore stateStore) {
+        this(dataSourceProvider, stateBackend, sandbox, checkpointStore, stateStore, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析 SPI
+     * @param stateBackend       状态后端（键控状态放哪）
+     * @param sandbox            脚本沙箱（filter / map / script 用）
+     * @param checkpointStore    水位游标存储（断点续传用；可空）
+     * @param stateStore         状态快照存储（键控状态落库用；可空）
+     * @param messageBus         消息总线（消息类源 / 汇用；可空）
+     */
+    public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
+                            ScriptSandbox sandbox, CheckpointStore checkpointStore,
+                            PipelineStateStore stateStore, MessageBus messageBus) {
         this.dataSourceProvider = dataSourceProvider;
         this.stateBackend = stateBackend;
         this.sandbox = sandbox;
         this.checkpointStore = checkpointStore;
         this.stateStore = stateStore;
+        this.messageBus = messageBus;
     }
 
     /**
@@ -153,7 +168,7 @@ public class PipelineExecutor {
         }
         List<String> topo = PipelineValidator.topologicalOrder(spec, index);
 
-        List<SourceOperator> sources = new ArrayList<SourceOperator>();
+        List<PullSource> sources = new ArrayList<PullSource>();
         List<String> sourceIds = new ArrayList<String>();
         List<com.zifang.z.etl.core.runtime.Operator> closables = new ArrayList<com.zifang.z.etl.core.runtime.Operator>();
         try {
@@ -161,9 +176,9 @@ public class PipelineExecutor {
                 PipelineNode node = index.get(id);
                 boolean stateful = node.getOperatorType().isStateful();
                 com.zifang.z.etl.core.runtime.Operator operator =
-                        OperatorFactory.create(node, dataSourceProvider, sandbox);
-                if (operator instanceof SourceOperator) {
-                    SourceOperator source = (SourceOperator) operator;
+                        OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus);
+                if (operator instanceof PullSource) {
+                    PullSource source = (PullSource) operator;
                     if (checkpoint != null && checkpoint.getWatermarkValue() != null) {
                         source.setResume(checkpoint.getWatermarkValue(), checkpoint.getTiebreakValue());
                     }
@@ -243,16 +258,17 @@ public class PipelineExecutor {
 
             // —— 水位游标落库 ——
             for (int i = 0; i < sources.size(); i++) {
-                SourceOperator source = sources.get(i);
-                if (checkpointStore == null || source.eventTimeColumn() == null
-                        || source.lastEventTimeValue() == null) {
+                PullSource source = sources.get(i);
+                String checkpointColumn = source.checkpointColumn();
+                Object checkpointValue = source.checkpointValue();
+                if (checkpointStore == null || checkpointColumn == null || checkpointValue == null) {
                     continue;
                 }
-                String type = source.eventTimeType();
-                String value = WatermarkCursor.format(source.lastEventTimeValue(), type);
+                String type = source.checkpointType();
+                String value = WatermarkCursor.format(checkpointValue, type);
                 String tiebreakValue = source.lastTiebreakValue() == null
                         ? null : String.valueOf(source.lastTiebreakValue());
-                checkpointStore.save(new Checkpoint(spec.getName(), source.eventTimeColumn(), type, value,
+                checkpointStore.save(new Checkpoint(spec.getName(), checkpointColumn, type, value,
                         source.tiebreakColumn(), tiebreakValue, mode, System.currentTimeMillis()));
                 result.setWatermarkAfter(value);
             }
@@ -260,12 +276,8 @@ public class PipelineExecutor {
             // —— 结果汇总 ——
             long written = 0L;
             for (com.zifang.z.etl.core.runtime.Operator operator : operators.values()) {
-                if (operator instanceof SinkOperators.JdbcSink) {
-                    written += ((SinkOperators.JdbcSink) operator).written();
-                } else if (operator instanceof SinkOperators.CollectSink) {
-                    written += ((SinkOperators.CollectSink) operator).rows().size();
-                } else if (operator instanceof SinkOperators.ConsoleSink) {
-                    written += ((SinkOperators.ConsoleSink) operator).printed();
+                if (operator instanceof CountingSink) {
+                    written += ((CountingSink) operator).written();
                 }
             }
             result.setRecordsWritten(written);
@@ -300,7 +312,7 @@ public class PipelineExecutor {
     }
 
     /** 活跃源的水位最小值（Flink 多入流口径：已结束的源不再拖住水位）。 */
-    private long minWatermarkOfActive(List<SourceOperator> sources, boolean[] done) {
+    private long minWatermarkOfActive(List<PullSource> sources, boolean[] done) {
         long min = Long.MAX_VALUE;
         boolean any = false;
         for (int i = 0; i < sources.size(); i++) {

@@ -29,6 +29,8 @@ public final class EtlSchema {
     public static final String TABLE_PIPELINE_STATE = "etl_pipeline_state";
     /** 流水线运行履历表。 */
     public static final String TABLE_PIPELINE_RUN = "etl_pipeline_run";
+    /** 消息队列表（默认消息总线实现：落库当队列）。 */
+    public static final String TABLE_MESSAGE_OUTBOX = "etl_message_outbox";
 
     private static final String[] DDL = new String[]{
             "CREATE TABLE IF NOT EXISTS " + TABLE_JOB_DEF + " ("
@@ -87,7 +89,15 @@ public final class EtlSchema {
                     + "restored INT, "
                     + "notes TEXT, "
                     + "started_at BIGINT, "
-                    + "finished_at BIGINT)"
+                    + "finished_at BIGINT)",
+            // 消息队列（默认消息总线）：发出即落行，消费标记 consumed=1
+            "CREATE TABLE IF NOT EXISTS " + TABLE_MESSAGE_OUTBOX + " ("
+                    + "message_id VARCHAR(64) PRIMARY KEY, "
+                    + "topic VARCHAR(128), "
+                    + "msg_key VARCHAR(256), "
+                    + "payload TEXT, "
+                    + "created_at BIGINT, "
+                    + "consumed INT)"
     };
 
     /**

@@ -65,14 +65,30 @@ public class EtlEngineConfiguration {
     }
 
     /**
+     * 消息总线（默认实现：落库表当队列，跨进程可读）。
+     *
+     * <p>宿主若要接 Kafka / RocketMQ，只需自己声明一个 {@link com.zifang.z.etl.core.spi.MessageBus}
+     * Bean 顶掉它（{@code @ConditionalOnMissingBean} 口径）。
+     */
+    @Bean
+    @ConditionalOnMissingBean(com.zifang.z.etl.core.spi.MessageBus.class)
+    public com.zifang.z.etl.core.spi.MessageBus etlMessageBus(@Qualifier("dataSourceEtl") DataSource dataSourceEtl)
+            throws Exception {
+        com.zifang.z.etl.core.connector.JdbcMessageBus.ensure(dataSourceEtl);
+        return new com.zifang.z.etl.core.connector.JdbcMessageBus(dataSourceEtl);
+    }
+
+    /**
      * 流水线管控引擎（登记 / 触发 / 水位 / 履历 / 计划解释）。
      */
     @Bean
     public PipelineEngine etlPipelineEngine(DataSourceProvider dataSourceProvider,
                                             PipelineRepository pipelineRepository,
                                             CheckpointStore checkpointStore,
-                                            PipelineStateStore pipelineStateStore) {
-        return new PipelineEngine(dataSourceProvider, pipelineRepository, checkpointStore, pipelineStateStore);
+                                            PipelineStateStore pipelineStateStore,
+                                            com.zifang.z.etl.core.spi.MessageBus messageBus) {
+        return new PipelineEngine(dataSourceProvider, pipelineRepository, checkpointStore, pipelineStateStore,
+                messageBus);
     }
 
     /**

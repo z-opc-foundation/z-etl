@@ -21,8 +21,9 @@ z-etl/
 │       ├── pipeline/          流水线声明模型（PipelineSpec/Node/Edge + 解析 + 校验 + DAG 拓扑）
 │       ├── runtime/           流式执行内核（Record/Operator/StateBackend/TimerService/水位 + PipelineExecutor）
 │       ├── operator/          算子集（source/filter/map/script/aggregate/window.aggregate/dedup/join/union/sinks）
+│       ├── connector/         连接器（文件 CSV/JSON/XLSX、HTTP、内联、脚本、消息 + PullSource 骨架 + 类型推断）
 │       ├── optimize/          计划优化器（过滤下推 / 合并映射 / 死节点摘除 + explain()）
-│       ├── spi/               DataSourceProvider（数据源解析 SPI，z-dms 落地后由它提供实现）
+│       ├── spi/               DataSourceProvider（数据源解析 SPI）+ MessageBus（消息总线 SPI）
 │       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推 + 流式拉取 fetchNextPage）
 │       ├── transform/         变换链（字段映射 → 行级表达式 → 脚本沙箱 → 类型归一）—— 线性作业用
 │       ├── writer/            写出器（批量 upsert + 幂等键）
@@ -33,7 +34,7 @@ z-etl/
 └── z-etl-web/                 管控面：job 登记 / 手动触发 / 水位与对账查询（REST）
     └── src/main/java/com/zifang/z/etl/web/
         ├── config/            EtlModuleDataSource（z.base.db.etl.* + @MapperScan 绑本域 sqlSessionFactory）
-        └── api/                EtlJobController + EtlJobService
+        └── api/                EtlJobController + EtlJobService + EtlPipelineController + EtlPipelineService
 ```
 
 ## 作业描述（JSON / yml 等价）
@@ -181,11 +182,40 @@ result.getNodeMetrics();          // 每节点计数（records-in / side-output 
 result.getWatermarkAfter();       // 本轮落下的水位
 ```
 
+**混合输入输出**（文件进 → HTTP 出，一样是一张 DAG）：
+
+```yaml
+name: file-to-api
+nodes:
+  - id: csv
+    type: file.csv.source                 # 输入：CSV 文件（表头 + 类型推断 + 事件时间增量）
+    config:
+      path: /data/orders.csv
+      columnTypes: {amount: BIGDECIMAL, updated_at: TIMESTAMP}
+      eventTimeColumn: updated_at
+  - id: clean
+    type: script                          # 中间：自由脚本清洗
+    config: {name: channel, engine: GROOVY, script: "payment_method.toUpperCase()"}
+  - id: out
+    type: http.sink                       # 输出：POST 给外部接口
+    config: {url: "https://api.internal/orders", format: json}
+edges:
+  - {from: csv, to: clean}
+  - {from: clean, to: out}
+```
+
 ### 算子表（类型串：`家族.算子`，下划线/中划线视作点）
 
 | 类型串 | 族 | 干什么 | 关键 config |
 |---|---|---|---|
 | `jdbc.source` | 源 | 分页游标拉数 + SQL 下推 + 事件时间水位 + 复合游标断点续传 | `table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume` |
+| `file.csv.source` | 源 | CSV 文件（表头 / 分隔符 / 引号可配；未声明列类型按内容推断） | `path/delimiter/quote/header/encoding/columns/columnTypes/skipRows/limit/eventTimeColumn` |
+| `file.json.source` | 源 | JSON 文件（`ndjson` 一行一个 / `json` 数组；`itemPath` 定位数组） | `path/format/itemPath/columns/columnTypes/encoding/eventTimeColumn` |
+| `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX） | `path/sheet/header/columns/columnTypes` |
+| `http.source` | 源 | REST / JSON 接口当流拉（可分页、可限主机） | `url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts` |
+| `inline.source` | 源 | 声明里写死的静态行（字典 / 维表 / 夹具） | `rows: [{...}]/columnTypes` |
+| `script.source` | 源 | z-script 沙箱脚本**生成**数据 | `script/engine/name/timeoutMs/maxOutputChars` |
+| `message.source` | 源 | 从消息总线消费（Kafka / RocketMQ / 库表队列） | `topic/pollSize` |
 | `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
 | `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
 | `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
@@ -197,8 +227,21 @@ result.getWatermarkAfter();       // 本轮落下的水位
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间） | `keyBy/keep/ttl` |
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀 | `left/right/leftKey/rightKey/joinType/rightSuffix` |
 | `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
+| `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
+| `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
+| `http.sink` | 汇 | POST 到外部接口（webhook / 业务 API） | `url/method/headers/format(json\|form)/timeoutMs` |
+| `message.sink` | 汇 | 发到消息总线（Kafka / RocketMQ / 库表队列） | `topic/keyColumn/keyField/format(json\|text)` |
 | `console.sink` | 汇 | 打日志（调试） | — |
 | `collect.sink` | 汇 | 收进内存列表（测试/预览） | — |
+
+类型串别名（写起来更省事）：`csv.source` / `json.source` / `excel.source` / `rest.source` /
+`kafka.source` / `kafka.sink` / `webhook.sink` / `mq.source` / `mq.sink` 等。
+
+**输入输出两侧共用一条水位口径**：所有源都实现 `PullSource`（拉一条 + 报水位 + 报游标），
+所有汇都实现 `CountingSink`（报写了多少行）⇒ 执行器对「换一种输入 / 输出」零改动。
+
+**消息类输入输出走 SPI**（`com.zifang.z.etl.core.spi.MessageBus`）：宿主注入自己的实现即可换成
+Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_message_outbox` 表当队列，跨进程可读）。
 
 安全口径与线性作业完全一致：LUA/JS 硬拒绝；GROOVY 走 z-script 沙箱（墙钟超时 + 产出上限）；
 标识符全过 `Identifiers` 白名单；聚合函数白名单。
@@ -292,7 +335,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 54 个用例（core 52 + web 2）
+mvn -o test              # 65 个用例（core 63 + web 2）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

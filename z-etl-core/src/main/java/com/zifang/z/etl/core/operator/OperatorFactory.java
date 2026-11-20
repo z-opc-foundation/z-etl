@@ -1,5 +1,16 @@
 package com.zifang.z.etl.core.operator;
 
+import com.zifang.z.etl.core.connector.FileCsvSink;
+import com.zifang.z.etl.core.connector.FileCsvSource;
+import com.zifang.z.etl.core.connector.FileJsonSink;
+import com.zifang.z.etl.core.connector.FileJsonSource;
+import com.zifang.z.etl.core.connector.FileXlsxSource;
+import com.zifang.z.etl.core.connector.HttpSink;
+import com.zifang.z.etl.core.connector.HttpSource;
+import com.zifang.z.etl.core.connector.InlineSource;
+import com.zifang.z.etl.core.connector.MessageSink;
+import com.zifang.z.etl.core.connector.MessageSource;
+import com.zifang.z.etl.core.connector.ScriptSource;
 import com.zifang.z.etl.core.pipeline.OperatorType;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
 import com.zifang.z.etl.core.runtime.Operator;
@@ -7,6 +18,7 @@ import com.zifang.z.etl.core.runtime.OperatorContext;
 import com.zifang.z.etl.core.runtime.Output;
 import com.zifang.z.etl.core.runtime.Record;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 
 /**
@@ -31,6 +43,20 @@ public final class OperatorFactory {
      * @return 算子实例
      */
     public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox) {
+        return create(node, provider, sandbox, null);
+    }
+
+    /**
+     * 按节点声明建算子（带消息总线）。
+     *
+     * @param node       节点声明
+     * @param provider   数据源解析（源 / 汇用）
+     * @param sandbox    脚本沙箱（filter / map / script 用）
+     * @param messageBus 消息总线（消息类源 / 汇用；可空 ⇒ 用到时报错说明）
+     * @return 算子实例
+     */
+    public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox,
+                                  MessageBus messageBus) {
         OperatorType type = node.getOperatorType();
         if (type == null) {
             type = OperatorType.fromId(node.getType());
@@ -41,6 +67,20 @@ public final class OperatorFactory {
         switch (type) {
             case JDBC_SOURCE:
                 return new SourceOperator(node, provider.resolve(node.string("dataSourceRef")));
+            case FILE_CSV_SOURCE:
+                return new FileCsvSource(node);
+            case FILE_JSON_SOURCE:
+                return new FileJsonSource(node);
+            case FILE_XLSX_SOURCE:
+                return new FileXlsxSource(node);
+            case HTTP_SOURCE:
+                return new HttpSource(node);
+            case INLINE_SOURCE:
+                return new InlineSource(node);
+            case SCRIPT_SOURCE:
+                return new ScriptSource(node, sandbox);
+            case MESSAGE_SOURCE:
+                return new MessageSource(node, messageBus);
             case FILTER:
                 return new FilterOperator(node, sandbox);
             case MAP:
@@ -63,6 +103,14 @@ public final class OperatorFactory {
                 return new UnionOperator(node);
             case JDBC_SINK:
                 return new SinkOperators.JdbcSink(node, provider.resolve(node.string("dataSourceRef")));
+            case FILE_CSV_SINK:
+                return new FileCsvSink(node);
+            case FILE_JSON_SINK:
+                return new FileJsonSink(node);
+            case HTTP_SINK:
+                return new HttpSink(node);
+            case MESSAGE_SINK:
+                return new MessageSink(node, messageBus);
             case CONSOLE_SINK:
                 return new SinkOperators.ConsoleSink(node);
             case COLLECT_SINK:

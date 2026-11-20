@@ -103,8 +103,8 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
             }
         }
         if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
-                || type == OperatorType.DIM_JOIN) {
-            // 左右两路列名与列集合交织 ⇒ 不裁
+                || type == OperatorType.DIM_JOIN || type == OperatorType.CEP_PATTERN) {
+            // 左右两路列名与列集合交织 / CEP 整行进部分匹配状态 ⇒ 不裁
             return ColumnNeed.all();
         }
         if (type.isSink() || type.isSource()) {

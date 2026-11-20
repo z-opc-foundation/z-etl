@@ -118,6 +118,12 @@ public final class PipelineValidator {
                             + " 必须声明 config.name（要引用的管道名）");
                 }
             }
+            if (type == OperatorType.CEP_PATTERN) {
+                if (node.mapList("steps").isEmpty()) {
+                    throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                            + " 必须声明 steps（至少一步 name/expression）");
+                }
+            }
             if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
                         || type == OperatorType.DIM_JOIN) {
                 if (in.size() != 2) {

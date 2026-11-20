@@ -79,6 +79,9 @@ public enum OperatorType {
     /** 维表关联（右流即维表：同键替换热更新、TTL 过期、select 投影；Flink broadcast-state 口径）。 */
     DIM_JOIN("dim.join", Kind.STATEFUL),
 
+    /** 模式匹配（单流步骤序列 + 次数量词 + within 时间窗；Flink CEP 口径的保守子集）。 */
+    CEP_PATTERN("cep.pattern", Kind.STATEFUL),
+
     /** JDBC 落地（批量 upsert / insert）。 */
     JDBC_SINK("jdbc.sink", Kind.SINK),
 
@@ -238,6 +241,10 @@ public enum OperatorType {
         if ("pipeline".equals(normalized) || "sub.pipeline".equals(normalized)
                 || "pipeline.include".equals(normalized)) {
             return PIPELINE_REF;
+        }
+        if ("cep".equals(normalized) || "pattern".equals(normalized)
+                || "pattern.match".equals(normalized) || "pattern.detect".equals(normalized)) {
+            return CEP_PATTERN;
         }
         // 输出类型别名
         if ("csv.sink".equals(normalized) || "file.csv.out".equals(normalized)) {

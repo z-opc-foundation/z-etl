@@ -128,6 +128,8 @@ public final class OperatorFactory {
                 return new IntervalJoinOperator(node);
             case DIM_JOIN:
                 return new DimJoinOperator(node);
+            case CEP_PATTERN:
+                return new CepPatternOperator(node, sandbox);
             case UNION:
                 return new UnionOperator(node);
             case JDBC_SINK:

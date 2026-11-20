@@ -116,7 +116,7 @@ public class IntervalJoinOperator implements Operator {
         }
         boolean fromLeft = isLeft(inputTag, record);
         List<String> keyColumns = fromLeft ? leftKey : rightKey;
-        String key = Keys.compute(record.row(), keyColumns);
+        String key = Keys.computeValues(record.row(), keyColumns);
         if (key == null) {
             throw new IllegalStateException("interval.join 节点 " + node.getId()
                     + " 的关联键列为空，算不出关联键");

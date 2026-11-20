@@ -71,6 +71,8 @@ class DimJoinOperatorTest {
         Map<String, Operator> captured = new LinkedHashMap<String, Operator>();
         PipelineRunResult result = run(yaml, captured);
         List<Map<String, Object>> rows = collectRows(captured);
+        System.out.println("DEBUG rows=" + rows + " read=" + result.getRecordsRead()
+                + " metrics=" + result.getNodeMetrics());
         assertEquals(1, rows.size(), "维表行不下传，主流 1 行拼 1 行: " + rows);
         assertEquals("杭州", rows.get(0).get("city_name"), "维表列应拼上主流");
         assertTrue(!rows.get(0).containsKey("province"), "select 之外的维表列不拼: " + rows.get(0));

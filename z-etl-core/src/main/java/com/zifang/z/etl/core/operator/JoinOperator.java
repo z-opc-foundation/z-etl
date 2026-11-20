@@ -83,7 +83,7 @@ public class JoinOperator implements Operator {
 
     /** 左侧（探测侧）：查右侧状态，命中就拼行。 */
     private void probe(Record record, Output output) {
-        String key = Keys.compute(record.row(), leftKey);
+        String key = Keys.computeValues(record.row(), leftKey);
         if (key == null) {
             throw new IllegalStateException("join 节点 " + node.getId() + " 的 leftKey 列为空，算不出关联键");
         }
@@ -106,7 +106,7 @@ public class JoinOperator implements Operator {
     /** 右侧（构建侧）：进状态，等左侧来查。 */
     @SuppressWarnings("unchecked")
     private void build(Record record) {
-        String key = Keys.compute(record.row(), rightKey);
+        String key = Keys.computeValues(record.row(), rightKey);
         if (key == null) {
             throw new IllegalStateException("join 节点 " + node.getId() + " 的 rightKey 列为空，算不出关联键");
         }

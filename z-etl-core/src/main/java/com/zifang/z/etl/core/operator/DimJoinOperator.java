@@ -112,7 +112,7 @@ public class DimJoinOperator implements Operator {
 
     /** 主流（探测侧）：查维表状态，命中就拼行。 */
     private void probe(Record record, Output output) {
-        String key = Keys.compute(record.row(), leftKey);
+        String key = Keys.computeValues(record.row(), leftKey);
         if (key == null) {
             throw new IllegalStateException("dim.join 节点 " + node.getId()
                     + " 的 leftKey 列为空，算不出关联键");
@@ -134,7 +134,7 @@ public class DimJoinOperator implements Operator {
 
     /** 维表流（广播侧）：同键替换（热更新），带投影；声明 ttl 时必须带事件时间。 */
     private void update(Record record) {
-        String key = Keys.compute(record.row(), rightKey);
+        String key = Keys.computeValues(record.row(), rightKey);
         if (key == null) {
             throw new IllegalStateException("dim.join 节点 " + node.getId()
                     + " 的 rightKey 列为空，算不出关联键");

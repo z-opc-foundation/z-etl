@@ -211,8 +211,8 @@ edges:
 | `jdbc.source` | 源 | 分页游标拉数 + SQL 下推 + 事件时间水位 + 复合游标断点续传 | `table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume` |
 | `file.csv.source` | 源 | CSV 文件（表头 / 分隔符 / 引号可配；未声明列类型按内容推断） | `path/delimiter/quote/header/encoding/columns/columnTypes/skipRows/limit/eventTimeColumn` |
 | `file.json.source` | 源 | JSON 文件（`ndjson` 一行一个 / `json` 数组；`itemPath` 定位数组） | `path/format/itemPath/columns/columnTypes/encoding/eventTimeColumn` |
-| `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX） | `path/sheet/header/columns/columnTypes` |
-| `http.source` | 源 | REST / JSON 接口当流拉（可分页、可限主机） | `url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts` |
+| `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX；日期样式还原成 Timestamp） | `path/sheet/header/columns/columnTypes` |
+| `http.source` | 源 | REST / JSON 接口当流拉（`pageParam` 翻页到空页停，可限主机） | `url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts` |
 | `inline.source` | 源 | 声明里写死的静态行（字典 / 维表 / 夹具） | `rows: [{...}]/columnTypes` |
 | `script.source` | 源 | z-script 沙箱脚本**生成**数据 | `script/engine/name/timeoutMs/maxOutputChars` |
 | `message.source` | 源 | 从消息总线消费（Kafka / RocketMQ / 库表队列） | `topic/pollSize` |
@@ -335,7 +335,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 65 个用例（core 63 + web 2）
+mvn -o test              # 69 个用例（core 67 + web 2）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

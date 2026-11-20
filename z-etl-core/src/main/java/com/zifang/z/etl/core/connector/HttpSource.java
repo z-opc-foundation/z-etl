@@ -113,11 +113,15 @@ public class HttpSource extends AbstractPullSource {
         }
     }
 
-    /** 拼页码参数。 */
+    /** 拼页码参数（{@code pageParam=页码}；声明了 pageSize 再带 {@code pageSize=}）。 */
     private String appendPage(String target, int page) {
-        int size = pageSize > 0 ? pageSize : nextPage;
-        String separator = target.indexOf('?') >= 0 ? "&" : "?";
-        return target + separator + pageParam + "=" + (pageSize > 0 ? size : page);
+        StringBuilder sb = new StringBuilder(target);
+        sb.append(target.indexOf('?') >= 0 ? '&' : '?');
+        sb.append(pageParam).append('=').append(page);
+        if (pageSize > 0) {
+            sb.append("&pageSize=").append(pageSize);
+        }
+        return sb.toString();
     }
 
     /** 调一次接口，取出数组项。 */

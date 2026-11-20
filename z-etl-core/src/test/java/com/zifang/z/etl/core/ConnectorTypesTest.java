@@ -350,6 +350,197 @@ class ConnectorTypesTest {
         }
     }
 
+    // ——— 输入：Excel 日期列 ———
+
+    @Test
+    @DisplayName("输入 file.xlsx.source：日期样式（numFmtId 14）还原成 Timestamp")
+    void xlsxSourceParsesDateColumns() throws Exception {
+        Path xlsx = temp.resolve("dated.xlsx");
+        writeXlsxWithStyles(xlsx, new String[][]{
+                {"id", "updated_at"},
+                {"1", "46023.5"},
+                {"2", "46024"}});
+        Map<String, Operator> captured = new LinkedHashMap<String, Operator>();
+        PipelineRunResult result = run(pipeline(
+                "file.xlsx.source",
+                "    config:\n"
+                        + "      path: " + xlsx + "\n"
+                        + "      columnTypes: {updated_at: TIMESTAMP}\n",
+                "collect.sink", ""), captured);
+        assertEquals(2L, result.getRecordsWritten());
+        List<Map<String, Object>> rows = collectRows(captured);
+        Object first = rows.get(0).get("updated_at");
+        assertTrue(first instanceof java.sql.Timestamp, "日期单元格应还原成 Timestamp，实际 "
+                + (first == null ? "null" : first.getClass().getName()));
+        assertEquals(java.sql.Timestamp.valueOf("2026-01-01 12:00:00"), first,
+                "Excel 序列数 46023.5 = 2026-01-01 12:00（基日 1899-12-30）");
+    }
+
+    // ——— 输入：CSV 无表头 + 跳行 + 限量 ———
+
+    @Test
+    @DisplayName("输入 file.csv.source：header=false + 声明列名 + skipRows + limit")
+    void csvSourceHeaderlessWithSkipAndLimit() throws Exception {
+        Path csv = temp.resolve("raw.csv");
+        Files.write(csv, ("这不是数据的前导行\n"
+                + "这也不是\n"
+                + "1,甲\n"
+                + "2,乙\n"
+                + "3,丙\n").getBytes(StandardCharsets.UTF_8));
+        Map<String, Operator> captured = new LinkedHashMap<String, Operator>();
+        PipelineRunResult result = run(pipeline(
+                "file.csv.source",
+                "    config:\n"
+                        + "      path: " + csv + "\n"
+                        + "      header: false\n"
+                        + "      columns: [id, name]\n"
+                        + "      skipRows: 2\n"
+                        + "      limit: 2\n",
+                "collect.sink", ""), captured);
+        assertEquals(2L, result.getRecordsRead(), "skipRows 跳过前导行，limit 限量 2 行");
+        List<Map<String, Object>> rows = collectRows(captured);
+        assertEquals("甲", rows.get(0).get("name"));
+        assertEquals("乙", rows.get(1).get("name"));
+    }
+
+    // ——— 输入：HTTP 分页 ———
+
+    @Test
+    @DisplayName("输入 http.source：pageParam 翻页拉全量（空页停）")
+    void httpSourcePagesThroughResults() throws Exception {
+        final List<String> requests = new CopyOnWriteArrayList<String>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/orders", new com.sun.net.httpserver.HttpHandler() {
+            @Override
+            public void handle(HttpExchange exchange) throws java.io.IOException {
+                requests.add(exchange.getRequestURI().toString());
+                int page = 1;
+                String query = exchange.getRequestURI().getQuery();
+                if (query != null && query.contains("page=")) {
+                    page = Integer.parseInt(query.replaceAll(".*page=(\\d+).*", "$1"));
+                }
+                StringBuilder items = new StringBuilder();
+                if (page <= 2) {
+                    for (int i = 0; i < 2; i++) {
+                        if (items.length() > 0) {
+                            items.append(',');
+                        }
+                        int id = (page - 1) * 2 + i + 1;
+                        items.append("{\"id\":").append(id).append("}");
+                    }
+                }
+                byte[] body = ("{\"items\":[" + items + "]}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                OutputStream out = exchange.getResponseBody();
+                out.write(body);
+                out.close();
+            }
+        });
+        server.start();
+        try {
+            Map<String, Operator> captured = new LinkedHashMap<String, Operator>();
+            PipelineRunResult result = run(pipeline(
+                    "http.source",
+                    "    config:\n"
+                            + "      url: http://127.0.0.1:" + server.getAddress().getPort() + "/orders\n"
+                            + "      itemPath: items\n"
+                            + "      pageParam: page\n"
+                            + "      pageSize: 2\n"
+                            + "      maxPages: 5\n"
+                            + "      allowedHosts: [127.0.0.1]\n",
+                    "collect.sink", ""), captured);
+            assertEquals(4L, result.getRecordsWritten(), "两页各 2 条，第 3 页空 ⇒ 停");
+            assertEquals(3, requests.size(), "应请求 3 次（第 3 次拿到空数组）");
+            assertEquals("page=1&pageSize=2", requests.get(0).split("\\?")[1], "页码参数应拼在 URL 上");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    // ——— 多源：全局水位 = 各活跃源最小值 ———
+
+    @Test
+    @DisplayName("多源水位：慢源拖住全局水位，窗口不提前结算 ⇒ 不丢迟到行")
+    void multiSourceGlobalWatermarkIsMinOfActive() throws Exception {
+        Path a = temp.resolve("a.csv");
+        Files.write(a, ("id,src,ts\n"
+                + "1,A,2026-01-01 00:00:00\n"
+                + "2,A,2026-01-01 00:01:00\n"
+                + "3,A,2026-01-01 00:02:00\n").getBytes(StandardCharsets.UTF_8));
+        Path b = temp.resolve("b.csv");
+        Files.write(b, ("id,src,ts\n"
+                + "11,B,2026-01-01 00:00:00\n"
+                + "12,B,2026-01-01 00:01:00\n"
+                + "13,B,2026-01-01 00:02:00\n").getBytes(StandardCharsets.UTF_8));
+
+        String yaml = ""
+                + "name: multi-source-watermark\n"
+                + "nodes:\n"
+                + "  - id: a\n"
+                + "    type: file.csv.source\n"
+                + "    config:\n"
+                + "      path: " + a + "\n"
+                + "      columnTypes: {ts: TIMESTAMP}\n"
+                + "      eventTimeColumn: ts\n"
+                + "      eventTimeType: TIMESTAMP\n"
+                + "      maxOutOfOrderness: 0s\n"
+                + "  - id: b\n"
+                + "    type: file.csv.source\n"
+                + "    config:\n"
+                + "      path: " + b + "\n"
+                + "      columnTypes: {ts: TIMESTAMP}\n"
+                + "      eventTimeColumn: ts\n"
+                + "      eventTimeType: TIMESTAMP\n"
+                + "      maxOutOfOrderness: 0s\n"
+                + "  - id: wagg\n"
+                + "    type: window.aggregate\n"
+                + "    config:\n"
+                + "      keyBy: [src]\n"
+                + "      window: {type: tumbling, size: 1m}\n"
+                + "      aggregates:\n"
+                + "        - {fn: COUNT, column: \"*\", alias: cnt}\n"
+                + "  - id: sink\n"
+                + "    type: collect.sink\n"
+                + "edges:\n"
+                + "  - {from: a, to: wagg}\n"
+                + "  - {from: b, to: wagg}\n"
+                + "  - {from: wagg, to: sink}\n";
+
+        Map<String, Operator> captured = new LinkedHashMap<String, Operator>();
+        PipelineRunResult result = run(yaml, captured);
+        assertEquals(6L, result.getRecordsRead());
+
+        // 两个源各 3 个 1 分钟窗口 ⇒ 6 个窗口行；若水位只按单源算，
+        // A 先进数据会提前结算 [00:00,00:01) 窗口，B 的 00:00 行就被当迟到丢掉（只剩 5 行）
+        List<Map<String, Object>> rows = collectRows(captured);
+        assertEquals(6, rows.size(), "A/B 各 3 个窗口，一行不丢: " + rows);
+        Map<String, Long> byKeyAndWindow = new LinkedHashMap<String, Long>();
+        for (Map<String, Object> row : rows) {
+            byKeyAndWindow.put(row.get("src") + "@" + String.valueOf(row.get("windowStart")),
+                    ((Number) row.get("cnt")).longValue());
+        }
+        for (String key : new String[]{"A", "B"}) {
+            assertEquals(3, countWindows(byKeyAndWindow, key), key + " 应有 3 个窗口");
+            for (Map.Entry<String, Long> entry : byKeyAndWindow.entrySet()) {
+                if (entry.getKey().startsWith(key + "@")) {
+                    assertEquals(Long.valueOf(1L), entry.getValue(),
+                            "每窗口 1 行: " + entry.getKey() + " = " + entry.getValue());
+                }
+            }
+        }
+    }
+
+    private int countWindows(Map<String, Long> byKeyAndWindow, String key) {
+        int count = 0;
+        for (String windowKey : byKeyAndWindow.keySet()) {
+            if (windowKey.startsWith(key + "@")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     // ——— 类型别名 ———
 
     @Test
@@ -466,5 +657,50 @@ class ConnectorTypesTest {
             }
         }
         return true;
+    }
+
+    /** 造一个带日期样式的最小 xlsx：styles.xml 里 cellXfs[1] 挂内置日期格式 numFmtId=14。 */
+    private void writeXlsxWithStyles(Path target, String[][] rows) throws Exception {
+        StringBuilder sheet = new StringBuilder();
+        sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
+                .append("<sheetData>");
+        for (int r = 0; r < rows.length; r++) {
+            sheet.append("<row r=\"").append(r + 1).append("\">");
+            for (int c = 0; c < rows[r].length; c++) {
+                String reference = columnRef(c) + (r + 1);
+                String value = rows[r][c];
+                if (r == 0) {
+                    sheet.append("<c r=\"").append(reference).append("\" t=\"inlineStr\"><is><t>")
+                            .append(value).append("</t></is></c>");
+                } else if (c == 1) {
+                    // 日期列：挂样式 1（numFmtId=14 内置日期格式）
+                    sheet.append("<c r=\"").append(reference).append("\" s=\"1\"><v>")
+                            .append(value).append("</v></c>");
+                } else {
+                    sheet.append("<c r=\"").append(reference).append("\" s=\"0\"><v>")
+                            .append(value).append("</v></c>");
+                }
+            }
+            sheet.append("</row>");
+        }
+        sheet.append("</sheetData></worksheet>");
+        String styles = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                + "<cellXfs count=\"2\">"
+                + "<xf numFmtId=\"0\"/>"
+                + "<xf numFmtId=\"14\" applyNumberFormat=\"1\"/>"
+                + "</cellXfs></styleSheet>";
+        ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(target));
+        try {
+            zos.putNextEntry(new ZipEntry("xl/worksheets/sheet1.xml"));
+            zos.write(sheet.toString().getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("xl/styles.xml"));
+            zos.write(styles.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        } finally {
+            zos.close();
+        }
     }
 }

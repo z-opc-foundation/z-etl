@@ -113,6 +113,18 @@ public class EtlPipelineService {
     }
 
     /**
+     * 试跑流水线（跑 N 行不落地，不碰水位与状态快照）。
+     *
+     * @param name       流水线名
+     * @param params     运行参数（可为 {@code null}）
+     * @param sampleRows 最多处理的行数
+     * @return 运行结果（recordsWritten 是「会写多少行」）
+     */
+    public PipelineRunResult dryRun(String name, Map<String, String> params, long sampleRows) throws Exception {
+        return pipelineEngine.dryRun(name, params, sampleRows);
+    }
+
+    /**
      * 水位记录。
      */
     @BizMethod(name = "流水线水位记录", module = "z-etl", description = "流水线水位记录。", operation = BizMethod.Operation.ACTION)

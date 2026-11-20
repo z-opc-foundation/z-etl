@@ -158,6 +158,28 @@ public class PipelineEngine {
                 + " 次失败（最后一次: " + (last == null ? "未知" : last.getMessage()) + "）", last);
     }
 
+    /**
+     * 试跑：最多处理 {@code sampleRows} 条，汇只计数不落地，不读不写水位与状态快照。
+     *
+     * <p>试跑不算履历（不算正式运行），也不碰任何持久状态 —— 纯观测。
+     *
+     * @param name       流水线名
+     * @param params     运行参数（占位符取值；可为 {@code null}）
+     * @param sampleRows 最多处理的行数
+     * @return 运行结果（{@code recordsWritten} 是「试跑下来会写多少行」）
+     */
+    public PipelineRunResult dryRun(String name, Map<String, String> params, long sampleRows) throws Exception {
+        PipelineSpec stored = repository.find(name);
+        if (stored == null) {
+            throw new IllegalArgumentException("流水线不存在: " + name
+                    + "（已登记: " + String.join(", ", repository.listNames()) + "）");
+        }
+        PipelineSpec spec = PipelineParams.resolve(PipelineParser.copyOf(stored), params);
+        PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
+                new ScriptSandbox(), null, null, messageBus);
+        return executor.dryRun(spec, sampleRows);
+    }
+
     /** 跑一次（不落履历）；重试与落履历由 {@link #run(String)} 负责。 */
     private PipelineRunResult runOnce(PipelineSpec spec) throws Exception {
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),

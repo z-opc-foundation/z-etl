@@ -363,6 +363,20 @@ nodes:
 - **落库的定义保留占位符** ⇒ 一份模板天天跑不同批次；参数只作用于本次运行；
 - 流水线名**不支持**占位符（名字是水位 / 状态快照的键）。
 
+### 试跑（`dryRun`）
+
+定义完一条流水线，先跑 N 行看看链路通不通、产出对不对：
+
+```java
+PipelineRunResult trial = engine.dryRun("daily-orders", params, 100L);
+trial.getRecordsWritten();   // 「试跑下来会写多少行」，不是真写了
+```
+
+- **汇只计数不落地**（不会把试验数据写进目标表）；
+- **不读不写水位与状态快照**（试跑不能当增量起点，也不算正式运行、不落履历）；
+- 最多处理 N 行（`?rows=100`）；源行数不足就跑完为止；
+- 试跑**从全量跑**（不读水位 ⇒ 可预测：「第一次跑会是什么样」）。
+
 ### 执行语义（与 Flink 对齐的部分）
 
 | 语义 | 口径 |
@@ -443,6 +457,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 | GET | `/api/etl/pipelines/{name}` | 流水线定义 |
 | GET | `/api/etl/pipelines/{name}/plan` | 计划解释（拓扑序文本计划 + 优化备注，text/plain） |
 | POST | `/api/etl/pipelines/{name}/run` | 触发流水线（body 可选 = 运行参数，如 `{"bizdate": "2026-11-19"}`） |
+| POST | `/api/etl/pipelines/{name}/dry-run` | **试跑**（`?rows=100`：最多处理 N 行收工；汇只计数不落地；不读不写水位与状态快照；body 可选 = 运行参数） |
 | GET | `/api/etl/pipelines/{name}/watermark` | 水位记录 |
 | GET | `/api/etl/pipelines/{name}/runs` | 运行履历 |
 | POST | `/api/etl/pipelines/{name}/schedule` | 登记调度（body = cron 表达式） |
@@ -476,7 +491,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 126 个用例（core 123 + web 3）
+mvn -o test              # 129 个用例（core 126 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

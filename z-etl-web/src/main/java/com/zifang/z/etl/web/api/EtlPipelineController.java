@@ -33,6 +33,7 @@ import java.util.Map;
  * POST /api/etl/pipelines/{name}/run       触发流水线（body 可选 = 运行参数）
  * GET  /api/etl/pipelines/{name}/watermark 水位记录
  * GET  /api/etl/pipelines/{name}/runs      运行履历
+ * POST /api/etl/pipelines/{name}/dry-run   试跑（跑 rows 行不落地）
  * POST /api/etl/pipelines/{name}/schedule  登记调度（body = cron 表达式）
  * GET  /api/etl/pipelines/{name}/schedule  调度登记（含下一次触发时间）
  * DELETE /api/etl/pipelines/{name}/schedule 取消调度
@@ -108,6 +109,21 @@ public class EtlPipelineController {
             description = "运行参数（声明里 ${name} 占位符的取值；不传则只有内置参数 bizdate/yesterday/now）",
             position = BizParam.Position.BODY) Map<String, String> params) throws Exception {
         return service.run(name, params);
+    }
+
+    /**
+     * 试跑流水线（跑 N 行不落地）。
+     */
+    @PostMapping(value = "/{name}/dry-run")
+    @BizApi(summary = "试跑流水线", description = "试跑流水线：最多处理 rows 行就收工，汇只计数不落地，不读不写水位与状态快照。", tags = {"z-etl"})
+    public PipelineRunResult dryRun(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "流水线名", position = BizParam.Position.PATH) String name,
+            @RequestParam(value = "rows", defaultValue = "100") @BizParam(name = "rows",
+            type = BizField.FieldType.INTEGER, description = "最多处理的行数", position = BizParam.Position.QUERY) long rows,
+            @RequestBody(required = false) @BizParam(name = "params", type = BizField.FieldType.JSON,
+            description = "运行参数（声明里 ${name} 占位符的取值）",
+            position = BizParam.Position.BODY) Map<String, String> params) throws Exception {
+        return service.dryRun(name, params, rows);
     }
 
     /**

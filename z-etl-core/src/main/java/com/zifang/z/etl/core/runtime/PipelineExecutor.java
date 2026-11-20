@@ -125,6 +125,34 @@ public class PipelineExecutor {
      */
     public PipelineRunResult execute(PipelineSpec spec,
                                      Map<String, com.zifang.z.etl.core.runtime.Operator> operatorCapture) throws Exception {
+        return execute(spec, operatorCapture, 0L);
+    }
+
+    /**
+     * 试跑：最多处理 {@code sampleRows} 条就收工，**汇只计数不落地**，不读不写水位与状态快照。
+     *
+     * <p>口径：定义完一条流水线，先试跑 N 行看看链路通不通、产出对不对 ——
+     * 不碰目标表（不会把试验数据写进生产）、不落水位（不会把「试跑」当增量起点）。
+     *
+     * @param spec       流水线声明
+     * @param sampleRows 最多处理的行数（源的行数不足就跑完为止）
+     * @return 运行结果（{@code recordsWritten} 是「试跑下来会写多少行」，不是真写了）
+     * @throws Exception 执行失败
+     */
+    public PipelineRunResult dryRun(PipelineSpec spec, long sampleRows) throws Exception {
+        return execute(spec, null, sampleRows);
+    }
+
+    /** 试跑（可捕获运行期算子实例）。 */
+    public PipelineRunResult dryRun(PipelineSpec spec, long sampleRows,
+                                    Map<String, com.zifang.z.etl.core.runtime.Operator> operatorCapture) throws Exception {
+        return execute(spec, operatorCapture, sampleRows);
+    }
+
+    private PipelineRunResult execute(PipelineSpec spec,
+                                     Map<String, com.zifang.z.etl.core.runtime.Operator> operatorCapture,
+                                     long sampleRows) throws Exception {
+        boolean dryRun = sampleRows > 0L;
         long start = System.currentTimeMillis();
         // —— 计划优化（过滤下推 / 投影下推 / 聚合下推 / 合并映射 / 摘死节点）——
         // 优化会改写声明 ⇒ 先深拷贝一份，别把调用方的对象改了
@@ -144,8 +172,10 @@ public class PipelineExecutor {
         result.setStartedAt(start);
         lastSeenWatermark = Long.MIN_VALUE;
 
-        // —— 状态快照恢复（mode=init 例外：清掉从头跑）——
-        if (stateStore != null) {
+        // —— 状态快照恢复（mode=init 例外：清掉从头跑；试跑一律不读不写）——
+        if (dryRun) {
+            result.addNote("dry-run：汇只计数不落地；不读不写水位与状态快照；最多处理 " + sampleRows + " 行");
+        } else if (stateStore != null) {
             if ("init".equals(mode)) {
                 stateStore.clear(plan.getName());
                 result.addNote("mode=init：清掉状态快照，从头跑");
@@ -159,15 +189,16 @@ public class PipelineExecutor {
             }
         }
 
-        // —— 水位游标（断点续传的「读到哪了」）——
-        Checkpoint checkpoint = checkpointStore == null ? null : checkpointStore.load(plan.getName());
-        if ("incremental".equals(mode)
-                && (checkpoint == null || checkpoint.getWatermarkValue() == null
+        // —— 水位游标（断点续传的「读到哪了」；试跑一律不读）——
+        Checkpoint checkpoint = (!dryRun && checkpointStore != null) ? checkpointStore.load(plan.getName()) : null;
+        if (checkpoint == null) {
+            checkpoint = null;
+        } else if ("incremental".equals(mode)
+                && (checkpoint.getWatermarkValue() == null
                 || checkpoint.getWatermarkValue().trim().isEmpty())) {
             throw new IllegalStateException("流水线 " + plan.getName()
                     + " 声明为 incremental 但没有水位记录（先跑一次全量，或改 mode=auto）");
-        }
-        if ("init".equals(mode) && checkpointStore != null) {
+        } else if ("init".equals(mode) && checkpointStore != null) {
             checkpointStore.clear(plan.getName());
             checkpoint = null;
         }
@@ -188,7 +219,9 @@ public class PipelineExecutor {
                 PipelineNode node = index.get(id);
                 boolean stateful = node.getOperatorType().isStateful();
                 com.zifang.z.etl.core.runtime.Operator operator =
-                        OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus);
+                        dryRun && node.getOperatorType().isSink()
+                                ? new DryRunSink(node)
+                                : OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus);
                 if (operator instanceof PullSource) {
                     PullSource source = (PullSource) operator;
                     if (checkpoint != null && checkpoint.getWatermarkValue() != null) {
@@ -243,6 +276,13 @@ public class PipelineExecutor {
                     }
                     recordsRead++;
                     nodeOutputs.get(sourceIds.get(i)).collect(record);
+                    if (dryRun && recordsRead >= sampleRows) {
+                        done[i] = true;
+                        for (int j = i + 1; j < sources.size(); j++) {
+                            done[j] = true;
+                        }
+                        break;
+                    }
                     long candidate = minWatermarkOfActive(sources, done);
                     if (candidate > lastWatermark) {
                         lastWatermark = candidate;
@@ -263,13 +303,13 @@ public class PipelineExecutor {
                 closables.get(i).close();
             }
 
-            // —— 状态快照落库 ——
-            if (stateStore != null) {
+            // —— 状态快照落库（试跑不落）——
+            if (stateStore != null && !dryRun) {
                 stateStore.save(plan.getName(), stateBackend.snapshot());
             }
 
-            // —— 水位游标落库 ——
-            for (int i = 0; i < sources.size(); i++) {
+            // —— 水位游标落库（试跑不落：试跑不能当增量起点）——
+            for (int i = 0; i < sources.size() && !dryRun; i++) {
                 PullSource source = sources.get(i);
                 String checkpointColumn = source.checkpointColumn();
                 Object checkpointValue = source.checkpointValue();
@@ -320,6 +360,55 @@ public class PipelineExecutor {
             contexts.clear();
             nodeOutputs.clear();
             timers.clear();
+        }
+    }
+
+    /** 试跑汇：只计数不落地（「试跑下来会写多少行」的量具）。 */
+    static final class DryRunSink implements CountingSink {
+
+        private final PipelineNode node;
+        private final OperatorContext context = new OperatorContext("dry-run", null, null);
+        private long written;
+
+        DryRunSink(PipelineNode node) {
+            this.node = node;
+        }
+
+        @Override
+        public void open(OperatorContext ctx) {
+            // 试跑汇无资源（不碰目标存储）
+        }
+
+        @Override
+        public void processElement(Record record, Output output) {
+            written++;
+            context.count("would-write");
+        }
+
+        @Override
+        public void processWatermark(long watermark) {
+            // 汇不涉水位
+        }
+
+        @Override
+        public void onTimer(long timestamp, String timerName) {
+            // 汇不涉定时器
+        }
+
+        @Override
+        public void close() {
+            // 无资源
+        }
+
+        @Override
+        public String operatorId() {
+            return node.getId();
+        }
+
+        /** 试跑下来会写多少行。 */
+        @Override
+        public long written() {
+            return written;
         }
     }
 

@@ -6,6 +6,8 @@ import com.zifang.z.etl.core.connector.FileJsonSink;
 import com.zifang.z.etl.core.connector.FileXlsxSink;
 import com.zifang.z.etl.core.connector.FileJsonSource;
 import com.zifang.z.etl.core.connector.FileXlsxSource;
+import com.zifang.z.etl.core.connector.FileXmlSink;
+import com.zifang.z.etl.core.connector.FileXmlSource;
 import com.zifang.z.etl.core.connector.HttpSink;
 import com.zifang.z.etl.core.connector.HttpSource;
 import com.zifang.z.etl.core.connector.InlineSource;
@@ -74,6 +76,8 @@ public final class OperatorFactory {
                 return new FileJsonSource(node);
             case FILE_XLSX_SOURCE:
                 return new FileXlsxSource(node);
+            case FILE_XML_SOURCE:
+                return new FileXmlSource(node);
             case HTTP_SOURCE:
                 return new HttpSource(node);
             case INLINE_SOURCE:
@@ -114,6 +118,8 @@ public final class OperatorFactory {
                 return new FileJsonSink(node);
             case FILE_XLSX_SINK:
                 return new FileXlsxSink(node);
+            case FILE_XML_SINK:
+                return new FileXmlSink(node);
             case HTTP_SINK:
                 return new HttpSink(node);
             case MESSAGE_SINK:

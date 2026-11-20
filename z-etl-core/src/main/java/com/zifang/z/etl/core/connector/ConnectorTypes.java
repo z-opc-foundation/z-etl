@@ -47,6 +47,9 @@ public final class ConnectorTypes {
         if ("xlsx".equals(key) || "excel".equals(key) || "file.xlsx".equals(key)) {
             return OperatorType.FILE_XLSX_SOURCE;
         }
+        if ("xml".equals(key) || "file.xml".equals(key)) {
+            return OperatorType.FILE_XML_SOURCE;
+        }
         if ("http".equals(key) || "rest".equals(key) || "api".equals(key)) {
             return OperatorType.HTTP_SOURCE;
         }
@@ -82,6 +85,9 @@ public final class ConnectorTypes {
         if ("xlsx".equals(key) || "excel".equals(key) || "file.xlsx".equals(key)) {
             return OperatorType.FILE_XLSX_SINK;
         }
+        if ("xml".equals(key) || "file.xml".equals(key)) {
+            return OperatorType.FILE_XML_SINK;
+        }
         if ("http".equals(key) || "rest".equals(key) || "webhook".equals(key) || "api".equals(key)) {
             return OperatorType.HTTP_SINK;
         }
@@ -112,6 +118,7 @@ public final class ConnectorTypes {
             case FILE_CSV_SOURCE:
             case FILE_JSON_SOURCE:
             case FILE_XLSX_SOURCE:
+            case FILE_XML_SOURCE:
                 keys.add("path");
                 break;
             case HTTP_SOURCE:
@@ -126,6 +133,7 @@ public final class ConnectorTypes {
             case FILE_CSV_SINK:
             case FILE_JSON_SINK:
             case FILE_XLSX_SINK:
+            case FILE_XML_SINK:
                 keys.add("path");
                 break;
             case MESSAGE_SOURCE:

@@ -22,6 +22,9 @@ public enum OperatorType {
     /** Excel 文件源（xlsx）。 */
     FILE_XLSX_SOURCE("file.xlsx.source", Kind.SOURCE),
 
+    /** XML 文件源（StAX 流式解析，重复元素即记录）。 */
+    FILE_XML_SOURCE("file.xml.source", Kind.SOURCE),
+
     /** HTTP 接口源（REST / JSON API）。 */
     HTTP_SOURCE("http.source", Kind.SOURCE),
 
@@ -81,6 +84,9 @@ public enum OperatorType {
 
     /** Excel 文件落地（xlsx，零依赖写 zip + worksheet）。 */
     FILE_XLSX_SINK("file.xlsx.sink", Kind.SINK),
+
+    /** XML 文件落地（XMLStreamWriter 流式写）。 */
+    FILE_XML_SINK("file.xml.sink", Kind.SINK),
 
     /** HTTP 接口落地（webhook / 业务 API）。 */
     HTTP_SINK("http.sink", Kind.SINK),
@@ -201,6 +207,9 @@ public enum OperatorType {
                 || "file.xlsx".equals(normalized)) {
             return FILE_XLSX_SOURCE;
         }
+        if ("xml.source".equals(normalized) || "file.xml".equals(normalized)) {
+            return FILE_XML_SOURCE;
+        }
         if ("http.source".equals(normalized) || "rest.source".equals(normalized)
                 || "http.api.source".equals(normalized)) {
             return HTTP_SOURCE;
@@ -227,6 +236,9 @@ public enum OperatorType {
         if ("xlsx.sink".equals(normalized) || "excel.sink".equals(normalized)
                 || "file.xlsx.out".equals(normalized)) {
             return FILE_XLSX_SINK;
+        }
+        if ("xml.sink".equals(normalized) || "file.xml.out".equals(normalized)) {
+            return FILE_XML_SINK;
         }
         if ("http.api.sink".equals(normalized) || "webhook.sink".equals(normalized)
                 || "rest.sink".equals(normalized)) {

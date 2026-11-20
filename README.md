@@ -78,7 +78,7 @@ job:
   name: csv-to-api
   mode: auto
   source:
-    type: file.csv                       # jdbc（默认）/ file.csv / file.json / file.xlsx / http / inline / script / message
+    type: file.csv                       # jdbc（默认）/ file.csv / file.json / file.xlsx / file.xml / http / inline / script / message
     watermarkColumn: updated_at          # 非 JDBC 源的事件时间列 ⇒ 也能按水位自动切增量
     options:                             # 连接器私有配置
       path: /data/orders.csv
@@ -274,6 +274,7 @@ edges:
 | `file.csv.source` | 源 | CSV 文件（表头 / 分隔符 / 引号可配；未声明列类型按内容推断） | `path/delimiter/quote/header/encoding/columns/columnTypes/skipRows/limit/eventTimeColumn` |
 | `file.json.source` | 源 | JSON 文件（`ndjson` 一行一个 / `json` 数组；`itemPath` 定位数组） | `path/format/itemPath/columns/columnTypes/encoding/eventTimeColumn` |
 | `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX；日期样式还原成 Timestamp） | `path/sheet/header/columns/columnTypes` |
+| `file.xml.source` | 源 | XML 文件（**零依赖** StAX 流式解析；`recordPath` 定位记录元素；属性成 `@列`，嵌套成 Map，重复子元素成 List） | `path/recordPath/encoding/columns/columnTypes/limit` |
 | `http.source` | 源 | REST / JSON 接口当流拉（`pageParam` 翻页到空页停，可限主机） | `url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts` |
 | `inline.source` | 源 | 声明里写死的静态行（字典 / 维表 / 夹具） | `rows: [{...}]/columnTypes` |
 | `script.source` | 源 | z-script 沙箱脚本**生成**数据 | `script/engine/name/timeoutMs/maxOutputChars` |
@@ -294,6 +295,7 @@ edges:
 | `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
 | `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
 | `file.xlsx.sink` | 汇 | 写 Excel 文件（**零依赖**：zip + worksheet；时间列写回序列数 + 日期样式 ⇒ 用 xlsx 源读回来还是 Timestamp） | `path/sheetName/header/columns` |
+| `file.xml.sink` | 汇 | 写 XML 文件（XMLStreamWriter 流式写；标量成子元素，null 成空元素，嵌套结构跳过） | `path/rootName/recordName/encoding/declaration/columns` |
 | `http.sink` | 汇 | POST 到外部接口（webhook / 业务 API） | `url/method/headers/format(json\|form)/timeoutMs` |
 | `message.sink` | 汇 | 发到消息总线（Kafka / RocketMQ / 库表队列） | `topic/keyColumn/keyField/format(json\|text)` |
 | `console.sink` | 汇 | 打日志（调试） | — |
@@ -491,7 +493,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 131 个用例（core 128 + web 3）
+mvn -o test              # 135 个用例（core 132 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -136,6 +136,8 @@ public final class OperatorFactory {
                 return new UnionOperator(node);
             case EXPLODE:
                 return new ExplodeOperator(node);
+            case TOPN:
+                return new TopNOperator(node);
             case JDBC_SINK:
                 return new SinkOperators.JdbcSink(node, provider.resolve(node.string("dataSourceRef")));
             case FILE_CSV_SINK:

@@ -289,6 +289,7 @@ edges:
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发 | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/aggregates` |
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间） | `keyBy/keep/ttl` |
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀 | `left/right/leftKey/rightKey/joinType/rightSuffix` |
+| `interval.join` | 有状态 | **区间连接**（Flink IntervalJoin 口径）：两路按「关联键 + 事件时间之差 ≤ within」两两配对，每对只发一次；水位到期清理缓存 | `left/right/leftKey/rightKey/within/joinType/rightSuffix` |
 | `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
 | `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
 | `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
@@ -370,6 +371,7 @@ nodes:
 | 窗口 | `[start, end)` 左闭右开；session 窗口相交自动合并；窗口触发后同键再迟到 ⇒ `allowedLateness` 内重算重发，之外丢弃并计数 |
 | 键控状态 | `ValueState/ListState/MapState`（堆实现，按算子隔离，`setCurrentKey` 口径与 Flink 一致） |
 | 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
+| 区间连接 | `interval.join`：两边都缓存，事件时间相差 ≤ `within` 的行按关联键两两配对（后到触发，每对只发一次）；水位 − within 之前的缓存清掉；没事件时间的行丢弃并计数 |
 | 状态快照 | 跑完把全部键控状态序列化存进 `PipelineStateStore`（内存 / JDBC 落库），下轮恢复 |
 | 断点续传 | 复用线性作业的水位游标（复合游标 + 回溯窗口），跑完落 `Checkpoint`，下轮从水位接力 |
 | 模式 | `auto`（有快照/水位续跑，否则全量）/ `init`（清掉重跑）/ `incremental`（无水位直接失败） |
@@ -473,7 +475,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 116 个用例（core 113 + web 3）
+mvn -o test              # 123 个用例（core 120 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

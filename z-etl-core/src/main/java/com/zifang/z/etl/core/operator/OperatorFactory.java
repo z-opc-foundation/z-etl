@@ -101,6 +101,8 @@ public final class OperatorFactory {
                 return new DedupOperator(node);
             case JOIN:
                 return new JoinOperator(node);
+            case INTERVAL_JOIN:
+                return new IntervalJoinOperator(node);
             case UNION:
                 return new UnionOperator(node);
             case JDBC_SINK:

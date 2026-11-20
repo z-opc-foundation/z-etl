@@ -111,7 +111,7 @@ public final class PipelineValidator {
                             + node.getId() + " 下推声明不合法: " + String.join("; ", pushdownErrors));
                 }
             }
-            if (type == OperatorType.JOIN) {
+            if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN) {
                 if (in.size() != 2) {
                     throw new IllegalArgumentException("join 节点 " + node.getId() + " 必须正好两条入边，实际 " + in.size());
                 }

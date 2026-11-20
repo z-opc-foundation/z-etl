@@ -250,7 +250,7 @@ public class AggregatePushdownRewriter implements PlanRewriter {
                     references.exact.add(ColumnReferences.normalize(column));
                 }
             }
-        } else if (type == OperatorType.JOIN) {
+        } else if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN) {
             references.opaque = true;
         }
         return references;

@@ -102,7 +102,7 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
                 return ColumnNeed.all();
             }
         }
-        if (type == OperatorType.JOIN) {
+        if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN) {
             // 左右两路列名与列集合交织 ⇒ 不裁
             return ColumnNeed.all();
         }

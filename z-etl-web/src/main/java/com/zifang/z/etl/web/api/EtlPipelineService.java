@@ -8,6 +8,7 @@ import com.zifang.z.meta.api.annotation.BizMethod;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 流水线管控服务（web 层），与 {@link EtlJobService} 同形状。
@@ -97,7 +98,18 @@ public class EtlPipelineService {
      */
     @BizMethod(name = "触发流水线", module = "z-etl", description = "触发流水线。", operation = BizMethod.Operation.ACTION)
     public PipelineRunResult run(String name) throws Exception {
-        return pipelineEngine.run(name);
+        return run(name, null);
+    }
+
+    /**
+     * 触发流水线（带运行参数）。
+     *
+     * @param name   流水线名
+     * @param params 运行参数（占位符取值；可为 {@code null}）
+     * @return 运行结果
+     */
+    public PipelineRunResult run(String name, Map<String, String> params) throws Exception {
+        return pipelineEngine.run(name, params);
     }
 
     /**

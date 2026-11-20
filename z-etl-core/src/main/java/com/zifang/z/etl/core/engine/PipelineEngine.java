@@ -4,6 +4,7 @@ import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.optimize.PlanOptimizer;
 import com.zifang.z.etl.core.job.RetrySpec;
+import com.zifang.z.etl.core.pipeline.PipelineParams;
 import com.zifang.z.etl.core.pipeline.PipelineParser;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
@@ -18,6 +19,7 @@ import com.zifang.z.etl.core.util.Backoff;
 import com.zifang.z.etl.core.util.CronExpression;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 流水线管控引擎（与 {@link EtlEngine} 同形状的门面）。
@@ -105,11 +107,27 @@ public class PipelineEngine {
      * @throws Exception 定义不存在或执行失败
      */
     public PipelineRunResult run(String name) throws Exception {
-        PipelineSpec spec = repository.find(name);
-        if (spec == null) {
+        return run(name, null);
+    }
+
+    /**
+     * 触发流水线（带运行参数）。
+     *
+     * <p>参数只作用于**本次运行**：落库的定义里占位符原样保留 ⇒ 同一份声明天天跑不同批次。
+     *
+     * @param name   流水线名
+     * @param params 运行参数（可为 {@code null} ⇒ 只有内置参数 bizdate/yesterday/now 可用）
+     * @return 运行结果
+     * @throws Exception 定义不存在或执行失败
+     */
+    public PipelineRunResult run(String name, Map<String, String> params) throws Exception {
+        PipelineSpec stored = repository.find(name);
+        if (stored == null) {
             throw new IllegalArgumentException("流水线不存在: " + name
                     + "（已登记: " + String.join(", ", repository.listNames()) + "）");
         }
+        // 在副本上替换占位符：落库的定义是「带占位符的模板」，不该被一次运行改坏
+        PipelineSpec spec = PipelineParams.resolve(PipelineParser.copyOf(stored), params);
         RetrySpec retry = spec.getRetry() == null ? new RetrySpec() : spec.getRetry();
         int maxAttempts = retry.effectiveMaxAttempts();
         if (maxAttempts == 1) {

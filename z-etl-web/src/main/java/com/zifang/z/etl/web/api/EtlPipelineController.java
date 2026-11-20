@@ -30,7 +30,7 @@ import java.util.Map;
  * GET  /api/etl/pipelines                  流水线名列表
  * GET  /api/etl/pipelines/{name}           流水线定义
  * GET  /api/etl/pipelines/{name}/plan      计划解释（拓扑序 + 优化备注）
- * POST /api/etl/pipelines/{name}/run       触发流水线
+ * POST /api/etl/pipelines/{name}/run       触发流水线（body 可选 = 运行参数）
  * GET  /api/etl/pipelines/{name}/watermark 水位记录
  * GET  /api/etl/pipelines/{name}/runs      运行履历
  * POST /api/etl/pipelines/{name}/schedule  登记调度（body = cron 表达式）
@@ -98,13 +98,16 @@ public class EtlPipelineController {
     }
 
     /**
-     * 触发流水线。
+     * 触发流水线（可选带运行参数）。
      */
     @PostMapping("/{name}/run")
-    @BizApi(summary = "触发流水线", description = "触发流水线。", tags = {"z-etl"})
+    @BizApi(summary = "触发流水线", description = "触发流水线（可选 body = 运行参数，如 {\"bizdate\": \"2026-11-19\"}）。", tags = {"z-etl"})
     public PipelineRunResult run(@PathVariable("name") @BizParam(name = "name",
-            type = BizField.FieldType.STRING, description = "流水线名", position = BizParam.Position.PATH) String name) throws Exception {
-        return service.run(name);
+            type = BizField.FieldType.STRING, description = "流水线名", position = BizParam.Position.PATH) String name,
+            @RequestBody(required = false) @BizParam(name = "params", type = BizField.FieldType.JSON,
+            description = "运行参数（声明里 ${name} 占位符的取值；不传则只有内置参数 bizdate/yesterday/now）",
+            position = BizParam.Position.BODY) Map<String, String> params) throws Exception {
+        return service.run(name, params);
     }
 
     /**

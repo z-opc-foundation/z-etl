@@ -336,6 +336,31 @@ Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_messa
 - ⚠️ 结算期判定失败时**数据已经落库**（质量闸 ≠ 事务），但水位不落库 ⇒ 下轮重跑；
 - 断言读的列会被投影下推**保活**（不会被裁掉）。
 
+### 管道参数（`${name}` 占位符）
+
+**同一份声明跑不同批次**：登记时写占位符，触发时给值。
+
+```yaml
+name: daily-orders
+nodes:
+  - id: src
+    type: jdbc.source
+    config:
+      dataSourceRef: ds-oc-main
+      table: z_trade_order
+      where: "dt = '${bizdate}'"     # 占位符
+      columns: [id, order_no, amount, dt]
+```
+
+- **内置参数**：`bizdate`（今天）/ `yesterday`（昨天）/ `now`（当前时间）；
+- **触发时传参**：`POST /api/etl/pipelines/{name}/run` body `{"bizdate": "2026-11-19"}`；
+  代码里 `engine.run(name, params)` 或 `PipelineParser.parse(text, params)`；
+- **缺参数直接报错**（不拿空串糊过去 —— 空串会让 `WHERE` 变成恒真，增量悄悄变全量）；
+- **参数值过白名单**（字母数字与 `_ . : / + - =`，无引号、无分号、无空格）⇒ 拼进 `where`
+  也不会变成注入面；需要更自由的值就用 `script` 算子（Groovy 沙箱）；
+- **落库的定义保留占位符** ⇒ 一份模板天天跑不同批次；参数只作用于本次运行；
+- 流水线名**不支持**占位符（名字是水位 / 状态快照的键）。
+
 ### 执行语义（与 Flink 对齐的部分）
 
 | 语义 | 口径 |
@@ -414,7 +439,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 | GET | `/api/etl/pipelines` | 流水线名列表 |
 | GET | `/api/etl/pipelines/{name}` | 流水线定义 |
 | GET | `/api/etl/pipelines/{name}/plan` | 计划解释（拓扑序文本计划 + 优化备注，text/plain） |
-| POST | `/api/etl/pipelines/{name}/run` | 触发流水线 |
+| POST | `/api/etl/pipelines/{name}/run` | 触发流水线（body 可选 = 运行参数，如 `{"bizdate": "2026-11-19"}`） |
 | GET | `/api/etl/pipelines/{name}/watermark` | 水位记录 |
 | GET | `/api/etl/pipelines/{name}/runs` | 运行履历 |
 | POST | `/api/etl/pipelines/{name}/schedule` | 登记调度（body = cron 表达式） |
@@ -448,7 +473,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 108 个用例（core 105 + web 3）
+mvn -o test              # 116 个用例（core 113 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -47,6 +47,17 @@ public final class PipelineParser {
     }
 
     /**
+     * 解析流水线声明并解析占位符（{@code ${name}}）。
+     *
+     * @param text   声明原文
+     * @param params 运行参数（可为 {@code null} ⇒ 只有内置参数可用）
+     * @return 占位符已替换的声明
+     */
+    public static PipelineSpec parse(String text, Map<String, String> params) {
+        return PipelineParams.resolve(parse(text), params);
+    }
+
+    /**
      * 解析 JSON 形态。
      *
      * @param text JSON 文本

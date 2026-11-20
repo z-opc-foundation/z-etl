@@ -5,6 +5,8 @@ import com.zifang.z.etl.core.checkpoint.JdbcCheckpointStore;
 import com.zifang.z.etl.core.engine.EtlEngine;
 import com.zifang.z.etl.core.engine.EtlSchema;
 import com.zifang.z.etl.core.engine.JdbcPipelineRepository;
+import com.zifang.z.etl.core.engine.JdbcPipelineScheduleRepository;
+import com.zifang.z.etl.core.engine.PipelineScheduleRepository;
 import com.zifang.z.etl.core.engine.JobRepository;
 import com.zifang.z.etl.core.engine.JdbcJobRepository;
 import com.zifang.z.etl.core.engine.PipelineEngine;
@@ -57,6 +59,17 @@ public class EtlEngineConfiguration {
     }
 
     /**
+     * 流水线调度登记（落 {@code etl_pipeline_schedule}）。
+     *
+     * <p>z-etl 只**登记 cron**；真正的定时器由宿主驱动（z-ops 定时任务 / k8s CronJob 调触发口）。
+     */
+    @Bean
+    public PipelineScheduleRepository etlPipelineScheduleRepository(
+            @Qualifier("dataSourceEtl") DataSource dataSourceEtl) {
+        return new JdbcPipelineScheduleRepository(dataSourceEtl);
+    }
+
+    /**
      * 流水线状态快照存储（落 {@code etl_pipeline_state} ⇒ 跨重启恢复键控状态）。
      */
     @Bean
@@ -86,9 +99,10 @@ public class EtlEngineConfiguration {
                                             PipelineRepository pipelineRepository,
                                             CheckpointStore checkpointStore,
                                             PipelineStateStore pipelineStateStore,
-                                            com.zifang.z.etl.core.spi.MessageBus messageBus) {
+                                            com.zifang.z.etl.core.spi.MessageBus messageBus,
+                                            PipelineScheduleRepository scheduleRepository) {
         return new PipelineEngine(dataSourceProvider, pipelineRepository, checkpointStore, pipelineStateStore,
-                messageBus);
+                messageBus, scheduleRepository);
     }
 
     /**

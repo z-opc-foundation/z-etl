@@ -15,6 +15,7 @@ import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.util.Backoff;
+import com.zifang.z.etl.core.util.CronExpression;
 
 import java.util.List;
 
@@ -34,10 +35,11 @@ public class PipelineEngine {
     private final CheckpointStore checkpointStore;
     private final PipelineStateStore stateStore;
     private final MessageBus messageBus;
+    private final PipelineScheduleRepository scheduleRepository;
 
     public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
                           CheckpointStore checkpointStore, PipelineStateStore stateStore) {
-        this(dataSourceProvider, repository, checkpointStore, stateStore, null);
+        this(dataSourceProvider, repository, checkpointStore, stateStore, null, null);
     }
 
     /**
@@ -50,11 +52,26 @@ public class PipelineEngine {
     public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
                           CheckpointStore checkpointStore, PipelineStateStore stateStore,
                           MessageBus messageBus) {
+        this(dataSourceProvider, repository, checkpointStore, stateStore, messageBus, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析
+     * @param repository          流水线定义仓储
+     * @param checkpointStore     水位游标存储
+     * @param stateStore          状态快照存储
+     * @param messageBus          消息总线（消息类源 / 汇用；可空）
+     * @param scheduleRepository  调度登记仓储（可空 ⇒ 不提供调度登记）
+     */
+    public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
+                          CheckpointStore checkpointStore, PipelineStateStore stateStore,
+                          MessageBus messageBus, PipelineScheduleRepository scheduleRepository) {
         this.dataSourceProvider = dataSourceProvider;
         this.repository = repository;
         this.checkpointStore = checkpointStore;
         this.stateStore = stateStore;
         this.messageBus = messageBus;
+        this.scheduleRepository = scheduleRepository;
     }
 
     /**
@@ -99,6 +116,7 @@ public class PipelineEngine {
             // 不声明重试 ⇒ 异常原样抛出（行为与从前完全一致）
             PipelineRunResult result = runOnce(spec);
             repository.saveRun(result);
+            touchSchedule(name);
             return result;
         }
         Exception last = null;
@@ -109,6 +127,7 @@ public class PipelineEngine {
                     result.addNote("第 " + attempt + " 次尝试成功（前 " + (attempt - 1) + " 次失败后重试）");
                 }
                 repository.saveRun(result);
+                touchSchedule(name);
                 return result;
             } catch (Exception e) {
                 last = e;
@@ -136,6 +155,68 @@ public class PipelineEngine {
     /** 运行履历（新→旧）。 */
     public List<PipelineRunResult> history(String name, int limit) {
         return repository.runHistory(name, limit);
+    }
+
+    /**
+     * 登记 / 更新调度（cron）。
+     *
+     * <p>z-etl 只**登记**：真正的定时器由宿主驱动（z-ops 定时任务 / k8s CronJob 调
+     * {@code POST /api/etl/pipelines/{name}/run}）⇒ ETL 进程不背调度职责。
+     *
+     * @param pipelineName 流水线名
+     * @param cron         cron 表达式（5 段：分 时 日 月 周）
+     * @param enabled      是否启用
+     * @return 登记（含下一次触发时间）
+     */
+    public PipelineSchedule schedule(String pipelineName, String cron, boolean enabled) {
+        if (scheduleRepository == null) {
+            throw new IllegalStateException("未配置调度登记仓储");
+        }
+        if (repository.find(pipelineName) == null) {
+            throw new IllegalArgumentException("流水线不存在: " + pipelineName);
+        }
+        CronExpression expression = CronExpression.parse(cron);
+        PipelineSchedule schedule = new PipelineSchedule(pipelineName, expression.expression());
+        schedule.setEnabled(enabled);
+        scheduleRepository.save(schedule);
+        return scheduleRepository.find(pipelineName);
+    }
+
+    /**
+     * 取消调度。
+     *
+     * @param pipelineName 流水线名
+     * @return 是否真的取消了
+     */
+    public boolean unschedule(String pipelineName) {
+        return scheduleRepository != null && scheduleRepository.remove(pipelineName);
+    }
+
+    /** 全部调度登记。 */
+    public List<PipelineSchedule> schedules() {
+        return scheduleRepository == null ? new java.util.ArrayList<PipelineSchedule>() : scheduleRepository.list();
+    }
+
+    /**
+     * 某条流水线的调度登记。
+     *
+     * @param pipelineName 流水线名
+     * @return 登记；没有返回 {@code null}
+     */
+    public PipelineSchedule schedule(String pipelineName) {
+        return scheduleRepository == null ? null : scheduleRepository.find(pipelineName);
+    }
+
+    /** 触发成功后记一次「上次触发时间」。 */
+    private void touchSchedule(String pipelineName) {
+        if (scheduleRepository == null) {
+            return;
+        }
+        try {
+            scheduleRepository.touch(pipelineName);
+        } catch (RuntimeException ignore) {
+            // 调度记账失败不影响本次运行结果
+        }
     }
 
     /** 计划解释（拓扑序文本计划 + 优化备注；不落库）。 */

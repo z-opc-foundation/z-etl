@@ -31,6 +31,8 @@ public final class EtlSchema {
     public static final String TABLE_PIPELINE_RUN = "etl_pipeline_run";
     /** 消息队列表（默认消息总线实现：落库当队列）。 */
     public static final String TABLE_MESSAGE_OUTBOX = "etl_message_outbox";
+    /** 流水线调度登记表（cron 表达式 + 上次触发时间）。 */
+    public static final String TABLE_PIPELINE_SCHEDULE = "etl_pipeline_schedule";
 
     private static final String[] DDL = new String[]{
             "CREATE TABLE IF NOT EXISTS " + TABLE_JOB_DEF + " ("
@@ -97,7 +99,15 @@ public final class EtlSchema {
                     + "msg_key VARCHAR(256), "
                     + "payload TEXT, "
                     + "created_at BIGINT, "
-                    + "consumed INT)"
+                    + "consumed INT)",
+            // 调度登记：z-etl 只登记 cron，定时器由宿主驱动
+            "CREATE TABLE IF NOT EXISTS " + TABLE_PIPELINE_SCHEDULE + " ("
+                    + "pipeline_name VARCHAR(128) PRIMARY KEY, "
+                    + "cron_expression VARCHAR(128), "
+                    + "enabled INT, "
+                    + "last_triggered_at BIGINT, "
+                    + "created_at BIGINT, "
+                    + "updated_at BIGINT)"
     };
 
     /**

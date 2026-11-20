@@ -2,6 +2,8 @@ package com.zifang.z.etl.web;
 
 import com.zifang.z.etl.core.checkpoint.InMemoryCheckpointStore;
 import com.zifang.z.etl.core.engine.InMemoryPipelineRepository;
+import com.zifang.z.etl.core.engine.InMemoryPipelineScheduleRepository;
+import com.zifang.z.etl.core.engine.PipelineSchedule;
 import com.zifang.z.etl.core.engine.PipelineEngine;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.runtime.InMemoryPipelineStateStore;
@@ -101,7 +103,7 @@ class EtlPipelineServiceTest {
                         .register("ds-dst", target),
                 new InMemoryPipelineRepository(),
                 new InMemoryCheckpointStore(),
-                new InMemoryPipelineStateStore());
+                new InMemoryPipelineStateStore(), null, new InMemoryPipelineScheduleRepository());
         service = new EtlPipelineService(engine);
     }
 
@@ -126,6 +128,20 @@ class EtlPipelineServiceTest {
 
         assertEquals(1, service.history("web-pipeline", 10).size());
         assertEquals("web-pipeline", service.history("web-pipeline", 10).get(0).getPipelineName());
+    }
+
+    @Test
+    @DisplayName("调度登记：登记 cron ⇒ 看得见下一次触发时间 ⇒ 可取消")
+    void scheduleIsVisibleAndCancelable() {
+        assertEquals("web-pipeline", service.register(SPEC));
+        PipelineSchedule schedule = service.schedule("web-pipeline", "0 * * * *", true);
+        assertNotNull(schedule);
+        assertEquals("0 * * * *", schedule.getCronExpression());
+        assertNotNull(schedule.getNextFireTime());
+        assertEquals(1, service.schedules().size());
+        assertNotNull(service.schedule("web-pipeline"));
+        assertTrue(service.unschedule("web-pipeline"));
+        assertEquals(0, service.schedules().size());
     }
 
     private static DataSource h2(String name) {

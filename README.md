@@ -103,6 +103,19 @@ job:
   （源行 vs 写出行的幂等键多重集），履历里会注明。
 - 断点续传口径不变：页级提交（写成功才推进水位），文件 / HTTP / 消息源同样按「水位 + 平局列」接力。
 
+### 调度登记（cron）
+
+z-etl **只登记，不起常驻定时线程** —— 定时器由宿主驱动（z-ops 定时任务 / k8s CronJob 调
+`POST /api/etl/pipelines/{name}/run`），ETL 进程不背调度职责，也不用管自己的存活。
+
+| 项 | 口径 |
+|---|---|
+| 表达式 | 5 段 cron（分 时 日 月 周）；支持 `*`、`*/n`、`a-b`、`a-b/n`、`a,b,c` |
+| 落点 | `etl_pipeline_schedule`（pipeline_name 主键 + cron + 上次触发时间） |
+| 可观测 | 登记里带**下一次触发时间**（本仓自算，供宿主对表与排障） |
+| 记账 | 每次成功触发后更新「上次触发时间」 |
+| 日 / 周 | 都写了且都不是 `*` 时取**并**（cron 惯例） |
+
 ### 失败重试（作业级 / 流水线级）
 
 ```yaml
@@ -360,6 +373,10 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 | POST | `/api/etl/pipelines/{name}/run` | 触发流水线 |
 | GET | `/api/etl/pipelines/{name}/watermark` | 水位记录 |
 | GET | `/api/etl/pipelines/{name}/runs` | 运行履历 |
+| POST | `/api/etl/pipelines/{name}/schedule` | 登记调度（body = cron 表达式） |
+| GET | `/api/etl/pipelines/{name}/schedule` | 调度登记（含下一次触发时间） |
+| DELETE | `/api/etl/pipelines/{name}/schedule` | 取消调度 |
+| GET | `/api/etl/pipelines/schedules` | 全部调度登记 |
 
 流水线定义落 `etl_pipeline_def`（JSON + yml 双份）；**键控状态快照**落 `etl_pipeline_state`
 （base64 TEXT，跨重启恢复 ⇒ 定时触发 / 崩溃后重跑从上次状态接力）；运行履历落 `etl_pipeline_run`。
@@ -387,7 +404,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 76 个用例（core 74 + web 2）
+mvn -o test              # 87 个用例（core 84 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

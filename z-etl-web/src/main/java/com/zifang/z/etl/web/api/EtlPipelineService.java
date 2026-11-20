@@ -2,6 +2,7 @@ package com.zifang.z.etl.web.api;
 
 import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.engine.PipelineEngine;
+import com.zifang.z.etl.core.engine.PipelineSchedule;
 import com.zifang.z.etl.core.runtime.PipelineRunResult;
 import com.zifang.z.meta.api.annotation.BizMethod;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,43 @@ public class EtlPipelineService {
     @BizMethod(name = "取流水线定义", module = "z-etl", description = "取流水线定义。", operation = BizMethod.Operation.QUERY)
     public com.zifang.z.etl.core.pipeline.PipelineSpec get(String name) {
         return pipelineEngine.get(name);
+    }
+
+    /**
+     * 登记 / 更新调度（cron）。
+     *
+     * @param pipelineName 流水线名
+     * @param cron         cron 表达式
+     * @param enabled      是否启用
+     * @return 调度登记（含下一次触发时间）
+     */
+    @BizMethod(name = "登记流水线调度（cron）", module = "z-etl", description = "登记流水线调度（cron 表达式）。", operation = BizMethod.Operation.CREATE)
+    public PipelineSchedule schedule(String pipelineName, String cron, boolean enabled) {
+        return pipelineEngine.schedule(pipelineName, cron, enabled);
+    }
+
+    /**
+     * 某条流水线的调度登记。
+     */
+    @BizMethod(name = "流水线调度登记", module = "z-etl", description = "流水线调度登记（含下一次触发时间）。", operation = BizMethod.Operation.QUERY)
+    public PipelineSchedule schedule(String pipelineName) {
+        return pipelineEngine.schedule(pipelineName);
+    }
+
+    /**
+     * 全部调度登记。
+     */
+    @BizMethod(name = "流水线调度登记列表", module = "z-etl", description = "流水线调度登记列表。", operation = BizMethod.Operation.QUERY)
+    public List<PipelineSchedule> schedules() {
+        return pipelineEngine.schedules();
+    }
+
+    /**
+     * 取消调度。
+     */
+    @BizMethod(name = "取消流水线调度", module = "z-etl", description = "取消流水线调度。", operation = BizMethod.Operation.ACTION)
+    public boolean unschedule(String pipelineName) {
+        return pipelineEngine.unschedule(pipelineName);
     }
 
     /**

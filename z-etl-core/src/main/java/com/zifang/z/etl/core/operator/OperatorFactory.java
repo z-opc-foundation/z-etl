@@ -91,6 +91,8 @@ public final class OperatorFactory {
                 return new FieldMappingOperator(node);
             case TYPE_NORMALIZE:
                 return new TypeNormalizeOperator(node);
+            case ASSERT:
+                return new AssertOperator(node, sandbox);
             case AGGREGATE:
                 return new AggregateOperator(node);
             case WINDOW_AGGREGATE:

@@ -164,6 +164,21 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
             for (Map<String, Object> item : node.mapList("rules")) {
                 columns.addAll(ColumnReferences.candidates(text(item.get("column"))));
             }
+        } else if (type == OperatorType.ASSERT) {
+            // 断言读的行列（表达式 + 各判定的列）必须活着传到它那儿，否则校验的是空值
+            columns.addAll(ColumnReferences.candidates(node.string("expression")));
+            for (String column : node.map("inRange").keySet()) {
+                columns.add(ColumnReferences.normalize(column));
+            }
+            for (String column : node.map("allowedValues").keySet()) {
+                columns.add(ColumnReferences.normalize(column));
+            }
+            for (String column : node.map("notNullRate").keySet()) {
+                columns.add(ColumnReferences.normalize(column));
+            }
+            for (String column : node.strings("unique")) {
+                columns.add(ColumnReferences.normalize(column));
+            }
         } else if (type == OperatorType.DEDUP
                 || type == OperatorType.AGGREGATE
                 || type == OperatorType.WINDOW_AGGREGATE) {

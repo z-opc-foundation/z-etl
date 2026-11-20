@@ -283,6 +283,7 @@ edges:
 | `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
 | `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
 | `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
+| `assert` | 变换 | **数据质量闸**：逐行判定 + 流结束结算；违规可失败 / 走旁路 / 只计数 | `mode/rejectedTo/expression/engine/inRange/allowedValues/notNullRate/unique/minRows/maxRows/exactRows` |
 | `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次） | `keyBy/aggregates: [{fn,column,alias}]` |
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发 | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/aggregates` |
@@ -310,6 +311,30 @@ Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_messa
 
 安全口径与线性作业完全一致：LUA/JS 硬拒绝；GROOVY 走 z-script 沙箱（墙钟超时 + 产出上限）；
 标识符全过 `Identifiers` 白名单；聚合函数白名单。
+
+### 数据质量闸（`assert` 算子）
+
+链上任一点插一道闸，**不合格的数据不许悄悄流下去**：
+
+```yaml
+  - id: gate
+    type: assert
+    config:
+      mode: reject                # fail（默认，抛错中止）/ reject（违规走旁路）/ count（只计数）
+      rejectedTo: dead            # mode=reject 时脏数据的去处
+      expression: "amount > 0"   # 逐行判定（EL / GROOVY）
+      inRange: {amount: [0, 1000000]}
+      allowedValues: {status: [0, 1, 2]}
+      notNullRate: {user_id: 1.0} # 流结束结算
+      unique: [order_no]          # 撞上重复即违规
+      minRows: 100                # 流结束结算
+```
+
+- **逐行判定**（边流边判）：`expression` / `inRange` / `allowedValues` / `unique`；
+- **结算期判定**（流结束才知道，`close()` 时结算）：`minRows` / `maxRows` / `exactRows` / `notNullRate`；
+- 违规计数落在节点指标里（`result.getNodeMetrics().get("gate").get("violations")`）；
+- ⚠️ 结算期判定失败时**数据已经落库**（质量闸 ≠ 事务），但水位不落库 ⇒ 下轮重跑；
+- 断言读的列会被投影下推**保活**（不会被裁掉）。
 
 ### 执行语义（与 Flink 对齐的部分）
 
@@ -423,7 +448,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 100 个用例（core 97 + web 3）
+mvn -o test              # 108 个用例（core 105 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

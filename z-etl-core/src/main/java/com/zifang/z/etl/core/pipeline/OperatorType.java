@@ -49,6 +49,9 @@ public enum OperatorType {
     /** 类型归一（类型 + 定点小数位 + 空值策略）。 */
     TYPE_NORMALIZE("type.normalize", Kind.TRANSFORM),
 
+    /** 数据质量断言（行级判定 + 流结束结算；违规可失败 / 走旁路 / 只计数）。 */
+    ASSERT("assert", Kind.TRANSFORM),
+
     /** 多路合并（把多条入边接成一路；也可以不写该节点，靠多入边天然合并）。 */
     UNION("union", Kind.TRANSFORM),
 
@@ -171,6 +174,10 @@ public enum OperatorType {
         }
         if ("types".equals(normalized) || "types.normalize".equals(normalized)) {
             return TYPE_NORMALIZE;
+        }
+        if ("assert".equals(normalized) || "quality.assert".equals(normalized)
+                || "quality.gate".equals(normalized) || "check".equals(normalized)) {
+            return ASSERT;
         }
         // 输入类型别名
         if ("csv.source".equals(normalized) || "csv".equals(normalized) || "file.csv".equals(normalized)) {

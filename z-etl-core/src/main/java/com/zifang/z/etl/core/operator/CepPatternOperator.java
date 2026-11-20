@@ -38,6 +38,7 @@ import java.util.Set;
  *     steps:
  *       - {name: create, expression: "type == 'CREATE'"}
  *       - {name: pay, expression: "type == 'PAID'", times: "1,"}   # 至少 1 次（可继续吃同条件事件）
+ *       - {name: ship, expression: "type == 'SHIP'", optional: true}  # 可选步骤：0 或 1 次
  * </pre>
  *
  * <p>口径：
@@ -45,6 +46,16 @@ import java.util.Set;
  *   <li><b>次数量词</b>：{@code times} 缺省 {@code 1}；{@code "n"} 恰好 n 次；
  *       {@code "n,"} 至少 n 次（最后一步未封顶 ⇒ 产出后部分匹配继续活着吃同类事件）；
  *       {@code "n,m"} 闭区间；</li>
+ *   <li><b>可选步骤</b>：{@code optional: true} 的步骤可以整步跳过（0 次）——
+ *       事件不吃进该步时开一条「跳过它」的分支继续往下试，原匹配也留着
+ *       （后续该步条件命中仍能走「吃到」路径，宁多配不少配）；
+ *       跳过的步骤产出里只有 {@code 步骤名#}（= 0），没有 {@code 步骤名.列}；</li>
+ *   <li><b>until 终止条件</b>：步骤可声明 {@code until} 表达式 —— 条件命中但 until
+ *       也命中的事件<b>不吃进该步</b>（部分匹配留着等推进；比 Flink 的「until 销毁匹配」
+ *       更保守：不销毁，只挡消费）；</li>
+ *   <li><b>流尾封口</b>：声明了 optional 步骤的管道在流结束时（{@link #flush}）把
+ *       「剩余步骤全是 optional」的部分匹配补产出（{@code flush-emitted} 计数）——
+ *       等不到终态事件也别把能封口的匹配憋死；</li>
  *   <li><b>within 超时</b>：声明了 {@code within} 的行必须带事件时间（否则丢弃并计数）；
  *       部分「首事件」太老的匹配在水位推进时清掉（{@code 水位 − within} 之前起步的再也等不到）；</li>
  *   <li><b>防爆炸</b>：每键部分匹配数有上限（缺省 64），超出丢最老的并计数；</li>
@@ -99,11 +110,23 @@ public class CepPatternOperator implements Operator {
                         + " 的步骤缺少 name/expression: " + item);
             }
             parseTimes(spec, item.get("times") == null ? null : String.valueOf(item.get("times")));
+            spec.optional = Boolean.parseBoolean(String.valueOf(item.get("optional")));
+            if (spec.optional && (spec.minTimes != 1 || spec.maxTimes != 1)) {
+                throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                        + " 的步骤 " + spec.name + " 是 optional，不能再声明 times（optional 就是 0 或 1 次）");
+            }
+            spec.until = item.get("until") == null ? null : String.valueOf(item.get("until")).trim();
+            if (spec.until != null && spec.until.isEmpty()) {
+                spec.until = null;
+            }
             spec.engine = item.get("engine") == null ? "EL" : String.valueOf(item.get("engine")).toUpperCase();
             spec.timeoutMs = item.get("timeoutMs") == null ? 2000L
                     : Long.parseLong(String.valueOf(item.get("timeoutMs")).trim());
             if ("EL".equals(spec.engine)) {
                 spec.el = new ElEvaluator();
+                if (spec.until != null) {
+                    spec.untilEl = new ElEvaluator();
+                }
             } else if ("GROOVY".equals(spec.engine) && sandbox == null) {
                 throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
                         + " 的步骤 " + spec.name + " 指定了 GROOVY 引擎，但没有沙箱执行器");
@@ -177,14 +200,15 @@ public class CepPatternOperator implements Operator {
         rememberKey(store, key);
     }
 
-    /** 用当前事件延续既有匹配：同级续吃（次数未封顶）+ 向下一步推进。 */
+    /** 用当前事件延续既有匹配：同级续吃（次数未封顶）+ 向下一步推进 + 可选步骤跳过。 */
     private void extend(Partial partial, Record record, long eventTime,
                         List<Partial> next, Output output) throws Exception {
         StepSpec current = steps.get(partial.stepIndex);
         StepMatch currentMatch = partial.steps.get(partial.stepIndex);
         boolean grownLast = false;
-        // 同级续吃：次数还没封顶、条件又命中
-        if (currentMatch.rows.size() < current.maxTimes && matches(current, record.row())) {
+        // 同级续吃：次数还没封顶、条件又命中、until 又没拦
+        if (currentMatch.rows.size() < current.maxTimes
+                && matches(current, record.row()) && !untilFired(current, record.row(), "续吃")) {
             Partial grown = partial.copy();
             grown.steps.get(grown.stepIndex).rows.add(row(record));
             if (grown.stepIndex == steps.size() - 1
@@ -218,12 +242,35 @@ public class CepPatternOperator implements Operator {
                 } else {
                     next.add(nextPartial);
                 }
+                // optional 步骤吃到了也开一条「不吃（0 次）」的分支 —— 两条路径都合法
+                if (step.optional && target + 1 < steps.size()) {
+                    skipAndFeed(partial, target, record, eventTime, next, output);
+                }
+            } else if (step.optional && target + 1 < steps.size()) {
+                // 下一步是 optional 又不吃这个事件 ⇒ 跳过它，同一事件继续往下试
+                skipAndFeed(partial, target, record, eventTime, next, output);
             }
         }
         // 没推进才保留原匹配（还能被后续事件推进 / 续吃）
         if (!advanced && !grownLast) {
             next.add(partial);
         }
+    }
+
+    /** 开一条「跳过 optional 步骤」的分支（该步 0 行），同一事件喂进去继续试后面的步骤。 */
+    private void skipAndFeed(Partial partial, int target, Record record, long eventTime,
+                             List<Partial> next, Output output) throws Exception {
+        Partial skipped = partial.copy();
+        StepMatch empty = new StepMatch();
+        empty.name = steps.get(target).name;
+        skipped.steps.add(empty);
+        skipped.stepIndex = target + 1;
+        // 新的当前步也要有位子（还没吃到，先空着；不变式：steps.size() == stepIndex + 1）
+        StepMatch pending = new StepMatch();
+        pending.name = steps.get(target + 1).name;
+        skipped.steps.add(pending);
+        context.count("optional-skipped");
+        extend(skipped, record, eventTime, next, output);
     }
 
     /** 用当前事件开新匹配（第一步条件命中）。 */
@@ -252,18 +299,74 @@ public class CepPatternOperator implements Operator {
 
     /** 匹配完成 ⇒ 产出：行 = 最后事件的行 + 每步「步骤名.列」（第一步事件）+「步骤名#」次数。 */
     private void emit(Partial partial, Record record, Output output) {
-        Map<String, Object> assembled = new LinkedHashMap<String, Object>(record.row());
+        output.collect(record.withRow(assembled(partial, record.row())));
+        context.count("matched");
+    }
+
+    /** 组装匹配行：基底行 + 每步「步骤名.列」（该步第一条事件，跳过的步骤没有）+「步骤名#」次数。 */
+    private Map<String, Object> assembled(Partial partial, Map<String, Object> baseRow) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>(baseRow);
         for (StepMatch step : partial.steps) {
             Map<String, Object> first = step.rows.isEmpty() ? null : step.rows.get(0);
             if (first != null) {
                 for (Map.Entry<String, Object> entry : first.entrySet()) {
-                    assembled.put(step.name + "." + entry.getKey(), entry.getValue());
+                    out.put(step.name + "." + entry.getKey(), entry.getValue());
                 }
             }
-            assembled.put(step.name + "#", step.rows.size());
+            out.put(step.name + "#", step.rows.size());
         }
-        output.collect(record.withRow(assembled));
-        context.count("matched");
+        return out;
+    }
+
+    /**
+     * 流尾封口：剩余步骤全是 optional 的部分匹配，等不到终态事件也在流结束时补产出。
+     *
+     * <p>只对声明了 optional 步骤的管道生效（没有 optional 就没有「跳着等」的匹配可封）。
+     */
+    @Override
+    public void flush(Output output) {
+        boolean anyOptional = false;
+        for (StepSpec step : steps) {
+            if (step.optional) {
+                anyOptional = true;
+                break;
+            }
+        }
+        if (!anyOptional) {
+            return;
+        }
+        StateBackend.KeyedStateStore store = context.state();
+        for (String key : new LinkedHashSet<String>(activeKeys(store))) {
+            store.setCurrentKey(key);
+            for (Partial partial : decode(store.listState("partials").get())) {
+                if (canFlushEmit(partial)) {
+                    Partial sealed = partial.copy();
+                    for (int i = partial.stepIndex + 1; i < steps.size(); i++) {
+                        StepMatch empty = new StepMatch();
+                        empty.name = steps.get(i).name;
+                        sealed.steps.add(empty);
+                    }
+                    List<Map<String, Object>> rows = partial.steps.get(partial.stepIndex).rows;
+                    Map<String, Object> last = rows.isEmpty()
+                            ? new LinkedHashMap<String, Object>() : rows.get(rows.size() - 1);
+                    output.collect(Record.of(assembled(sealed, last)));
+                    context.count("flush-emitted");
+                }
+            }
+        }
+    }
+
+    /** 能否流尾封口：还没走到最后一步，且剩余步骤全是 optional。 */
+    private boolean canFlushEmit(Partial partial) {
+        if (partial.stepIndex >= steps.size() - 1) {
+            return false;
+        }
+        for (int i = partial.stepIndex + 1; i < steps.size(); i++) {
+            if (!steps.get(i).optional) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 步骤条件求值（EL 缺省；GROOVY 走沙箱；LUA/JS 无沙箱 ⇒ 硬拒绝）。 */
@@ -285,6 +388,31 @@ public class CepPatternOperator implements Operator {
                     + " 的步骤 " + step.name + " 求值失败: " + e.getMessage(), e);
         }
         return toBoolean(value);
+    }
+
+    /** until 终止条件：命中 ⇒ 该事件不吃进这一步（部分匹配留着等推进，不销毁）。 */
+    private boolean untilFired(StepSpec step, Map<String, Object> row, String where) {
+        if (step.until == null) {
+            return false;
+        }
+        Object value;
+        try {
+            if ("EL".equals(step.engine)) {
+                value = step.untilEl.eval(step.until, row);
+            } else if ("GROOVY".equals(step.engine)) {
+                value = sandbox.evalGroovy(step.until, row, step.timeoutMs);
+            } else {
+                return false;
+            }
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
+                    + " 的步骤 " + step.name + " 的 until（" + where + "）求值失败: " + e.getMessage(), e);
+        }
+        boolean fired = toBoolean(value);
+        if (fired) {
+            context.count("until-stopped");
+        }
+        return fired;
     }
 
     /** 结果归布尔（与 filter 同口径）。 */
@@ -393,7 +521,7 @@ public class CepPatternOperator implements Operator {
         return new ArrayList<Object>(partials);
     }
 
-    /** 一个步骤的声明（条件 + 次数量词 + 求值引擎）。 */
+    /** 一个步骤的声明（条件 + 次数量词 + optional + until + 求值引擎）。 */
     private static final class StepSpec {
         private String name;
         private String expression;
@@ -401,7 +529,10 @@ public class CepPatternOperator implements Operator {
         private long timeoutMs;
         private int minTimes;
         private int maxTimes;
+        private boolean optional;
+        private String until;
         private ElEvaluator el;
+        private ElEvaluator untilEl;
     }
 
     /** 一个步骤的已匹配事件（可序列化 ⇒ 能进检查点）。 */

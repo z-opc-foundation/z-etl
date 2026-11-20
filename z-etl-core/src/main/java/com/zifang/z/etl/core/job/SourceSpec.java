@@ -11,6 +11,12 @@ package com.zifang.z.etl.core.job;
  */
 public class SourceSpec {
 
+    /** 连接器类型（默认 {@code jdbc}；其余复用 DAG 层的同一套连接器）。 */
+    private String type = "jdbc";
+
+    /** 连接器私有配置（{@code path} / {@code url} / {@code topic} / {@code rows} …）。 */
+    private java.util.Map<String, Object> options = new java.util.LinkedHashMap<String, Object>();
+
     /** 数据源引用（z-dms DataSourceDef 的 ref / 名称）。 */
     private String dataSourceRef;
 
@@ -34,6 +40,27 @@ public class SourceSpec {
 
     /** SQL 下推声明（过滤下推 / 聚合下推）；为空表示不下推。 */
     private PushdownSpec pushdown;
+
+    /** 连接器类型（缺省 jdbc）。 */
+    public String effectiveType() {
+        return type == null || type.trim().isEmpty() ? "jdbc" : type.trim().toLowerCase();
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public java.util.Map<String, Object> getOptions() {
+        return options;
+    }
+
+    public void setOptions(java.util.Map<String, Object> options) {
+        this.options = options == null ? new java.util.LinkedHashMap<String, Object>() : options;
+    }
 
     public PushdownSpec getPushdown() {
         return pushdown;

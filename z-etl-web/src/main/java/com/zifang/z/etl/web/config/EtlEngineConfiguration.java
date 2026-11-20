@@ -112,7 +112,8 @@ public class EtlEngineConfiguration {
      */
     @Bean
     public EtlEngine etlEngine(DataSourceProvider dataSourceProvider, JobRepository jobRepository,
-                                CheckpointStore checkpointStore) {
-        return new EtlEngine(dataSourceProvider, jobRepository, checkpointStore);
+                                CheckpointStore checkpointStore,
+                                com.zifang.z.etl.core.spi.MessageBus messageBus) {
+        return new EtlEngine(dataSourceProvider, jobRepository, checkpointStore, messageBus);
     }
 }

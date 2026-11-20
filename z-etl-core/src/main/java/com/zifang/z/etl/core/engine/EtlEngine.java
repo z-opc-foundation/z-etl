@@ -13,12 +13,18 @@ import com.zifang.z.etl.core.job.ScriptSpec;
 import com.zifang.z.etl.core.job.SourceSpec;
 import com.zifang.z.etl.core.job.TargetSpec;
 import com.zifang.z.etl.core.job.TransformSpec;
+import com.zifang.z.etl.core.connector.ConnectorFactory;
+import com.zifang.z.etl.core.connector.ConnectorTypes;
+import com.zifang.z.etl.core.reader.ConnectorRowReader;
 import com.zifang.z.etl.core.reader.JdbcRowReader;
 import com.zifang.z.etl.core.reader.PageHandler;
+import com.zifang.z.etl.core.reader.PagedRowReader;
 import com.zifang.z.etl.core.reader.RowConsumer;
 import com.zifang.z.etl.core.reconcile.ReconciliationReport;
 import com.zifang.z.etl.core.reconcile.Reconciler;
+import com.zifang.z.etl.core.runtime.PullSource;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.transform.FieldMappingTransformer;
 import com.zifang.z.etl.core.transform.ExpressionTransformer;
 import com.zifang.z.etl.core.transform.RowTransformer;
@@ -26,7 +32,10 @@ import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.transform.ScriptTransformer;
 import com.zifang.z.etl.core.transform.TransformChain;
 import com.zifang.z.etl.core.transform.TypeNormalizationTransformer;
+import com.zifang.z.etl.core.util.Checksums;
 import com.zifang.z.etl.core.util.RowValues;
+import com.zifang.z.etl.core.writer.ConnectorRowWriter;
+import com.zifang.z.etl.core.writer.JobWriter;
 import com.zifang.z.etl.core.writer.JdbcUpsertWriter;
 import com.zifang.util.db.support.Identifiers;
 
@@ -61,17 +70,30 @@ public class EtlEngine {
     private final DataSourceProvider dataSourceProvider;
     private final JobRepository jobRepository;
     private final CheckpointStore checkpointStore;
+    private final MessageBus messageBus;
     private final Reconciler reconciler = new Reconciler();
 
     public EtlEngine(DataSourceProvider dataSourceProvider, CheckpointStore checkpointStore) {
-        this(dataSourceProvider, null, checkpointStore);
+        this(dataSourceProvider, null, checkpointStore, null);
     }
 
     public EtlEngine(DataSourceProvider dataSourceProvider, JobRepository jobRepository,
                      CheckpointStore checkpointStore) {
+        this(dataSourceProvider, jobRepository, checkpointStore, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析
+     * @param jobRepository      作业仓储
+     * @param checkpointStore    水位存储
+     * @param messageBus         消息总线（消息类源 / 汇用；可空）
+     */
+    public EtlEngine(DataSourceProvider dataSourceProvider, JobRepository jobRepository,
+                     CheckpointStore checkpointStore, MessageBus messageBus) {
         this.dataSourceProvider = dataSourceProvider;
         this.jobRepository = jobRepository;
         this.checkpointStore = checkpointStore;
+        this.messageBus = messageBus;
     }
 
     /**
@@ -120,11 +142,15 @@ public class EtlEngine {
         String onOutOfRange = resolveOnOutOfRange(descriptor);
         String tiebreakBefore = checkpoint == null ? null : checkpoint.getTiebreakValue();
 
-        DataSource sourceDs = dataSourceProvider.resolve(sourceSpec.getDataSourceRef());
-        DataSource targetDs = dataSourceProvider.resolve(targetSpec.getDataSourceRef());
+        boolean sourceJdbc = ConnectorTypes.isJdbc(sourceSpec.effectiveType());
+        boolean targetJdbc = ConnectorTypes.isJdbc(targetSpec.effectiveType());
+        DataSource sourceDs = sourceJdbc
+                ? dataSourceProvider.resolve(sourceSpec.getDataSourceRef()) : null;
+        DataSource targetDs = targetJdbc
+                ? dataSourceProvider.resolve(targetSpec.getDataSourceRef()) : null;
 
         // —— 越界检测（只在增量模式、且已有水位时才有意义）——
-        if (incremental && watermarkColumn != null && watermarkBefore != null
+        if (sourceJdbc && incremental && watermarkColumn != null && watermarkBefore != null
                 && !isAggregatePushdown(sourceSpec)) {
             SourceWatermarkStats stats = sourceWatermarkStats(sourceDs, sourceSpec, watermarkColumn,
                     watermarkBefore, watermarkType);
@@ -153,14 +179,6 @@ public class EtlEngine {
         final WatermarkCursor[] cursor = new WatermarkCursor[]{null};
         final long[] read = new long[]{0L};
 
-        JdbcRowReader reader = new JdbcRowReader(sourceDs, sourceSpec,
-                incremental ? watermarkColumn : null,
-                incremental ? watermarkBefore : null,
-                watermarkType,
-                incremental ? tiebreakColumn : null,
-                incremental ? tiebreakBefore : null,
-                incremental ? overlap : 0L);
-
         TransformChain chain;
         ScriptSandbox sandbox = new ScriptSandbox();
         try {
@@ -170,8 +188,42 @@ public class EtlEngine {
             throw e;
         }
         List<String> keyColumns = new ArrayList<String>(descriptor.getIdempotencyKey());
-        JdbcUpsertWriter writer = new JdbcUpsertWriter(targetDs, targetSpec, keyColumns,
-                targetColumns(descriptor, targetSpec));
+
+        // —— 取数：JDBC 走 SQL 游标，其余走连接器（文件 / HTTP / 消息 …）——
+        PagedRowReader reader;
+        PullSource connectorSource = null;
+        if (sourceJdbc) {
+            reader = new JdbcRowReader(sourceDs, sourceSpec,
+                    incremental ? watermarkColumn : null,
+                    incremental ? watermarkBefore : null,
+                    watermarkType,
+                    incremental ? tiebreakColumn : null,
+                    incremental ? tiebreakBefore : null,
+                    incremental ? overlap : 0L);
+        } else {
+            connectorSource = ConnectorFactory.createSource(sourceSpec, watermarkColumn, watermarkType,
+                    incremental ? tiebreakColumn : null,
+                    incremental ? watermarkBefore : null,
+                    incremental ? tiebreakBefore : null,
+                    dataSourceProvider, sandbox, messageBus);
+            reader = new ConnectorRowReader(connectorSource, sourceSpec.getPageSize());
+        }
+
+        // —— 写出：JDBC 走 upsert 写出器，其余走连接器汇 ——
+        JobWriter writer;
+        if (targetJdbc) {
+            writer = new JdbcUpsertWriter(targetDs, targetSpec, keyColumns,
+                    targetColumns(descriptor, targetSpec));
+        } else {
+            writer = new ConnectorRowWriter(
+                    ConnectorFactory.createSink(targetSpec, dataSourceProvider, sandbox, messageBus));
+        }
+
+        // 非 JDBC 侧没有整表可扫 ⇒ 对账改「本轮行内口径」（源行 vs 写出行的键多重集）
+        final boolean inlineReconcile = !(sourceJdbc && targetJdbc);
+        final long[] sourceChecksumSum = new long[1];
+        final long[] targetChecksumSum = new long[1];
+        final List<String> sourceKeyColumns = sourceKeyColumns(descriptor);
 
         try {
             // 页级搬运：读一页 → 写一页 → **提交成功才推进水位** ⇒ 崩在中途水位停在上一个成功页
@@ -181,6 +233,10 @@ public class EtlEngine {
                     for (Map<String, Object> row : page) {
                         Map<String, Object> transformed = chain.transform(row);
                         writer.write(transformed);
+                        if (inlineReconcile) {
+                            sourceChecksumSum[0] += Checksums.rowHash(row, sourceKeyColumns);
+                            targetChecksumSum[0] += Checksums.rowHash(transformed, keyColumns);
+                        }
                         WatermarkCursor rowCursor = cursorOf(row, watermarkColumn, tiebreakColumn, watermarkType);
                         if (rowCursor != null && (cursor[0] == null || rowCursor.isAfter(cursor[0]))) {
                             cursor[0] = rowCursor;
@@ -198,7 +254,18 @@ public class EtlEngine {
         } catch (Exception e) {
             throw new IllegalStateException("作业 " + descriptor.getName() + " 执行失败: " + e.getMessage(), e);
         } finally {
-            writer.close();
+            try {
+                writer.close();
+            } catch (Exception ignore) {
+                // 关闭异常不影响主异常
+            }
+            if (connectorSource != null) {
+                try {
+                    connectorSource.close();
+                } catch (Exception ignore) {
+                    // 关闭异常不影响主异常
+                }
+            }
             sandbox.close();
         }
 
@@ -225,17 +292,22 @@ public class EtlEngine {
 
         // 对账（行数 + 校验和双口径；源侧按作业实际取数口径复现：过滤下推 / 聚合下推都算进去）
         ReconciliationReport report;
-        try {
-            report = reconciler.reconcile(sourceDs, sourceSpec, sourceKeyColumns(descriptor),
-                    targetDs, targetSpec.getTable(), keyColumns);
-        } catch (java.sql.SQLException e) {
-            throw new IllegalStateException("作业 " + descriptor.getName() + " 对账失败: " + e.getMessage(), e);
+        if (inlineReconcile) {
+            report = inlineReport(read[0], writer.written(), sourceChecksumSum[0], targetChecksumSum[0]);
+            result.addNote("非 JDBC 侧没有整表可扫：对账按本轮行内口径（源行 vs 写出行的幂等键多重集）");
+        } else {
+            try {
+                report = reconciler.reconcile(sourceDs, sourceSpec, sourceKeyColumns,
+                        targetDs, targetSpec.getTable(), keyColumns);
+            } catch (java.sql.SQLException e) {
+                throw new IllegalStateException("作业 " + descriptor.getName() + " 对账失败: " + e.getMessage(), e);
+            }
         }
         result.setReport(report);
         result.setReconciled(report.matched());
 
         // —— 时钟回拨 / 迟到数据：源目标行数有落差 ⇒ 报「没搬过去的行数」+ 游标之前压着的行数 ——
-        if (!report.isCountMatched() && watermarkColumn != null && watermarkBefore != null
+        if (sourceJdbc && !report.isCountMatched() && watermarkColumn != null && watermarkBefore != null
                 && !isAggregatePushdown(sourceSpec)) {
             long shortfall = report.getSourceCount() - report.getTargetCount();
             if (shortfall > 0L) {
@@ -432,6 +504,27 @@ public class EtlEngine {
                 cursor == null ? null : cursor.getValue(),
                 tiebreakColumn, cursor == null ? null : cursor.getTiebreakValue(),
                 mode, System.currentTimeMillis()));
+    }
+
+    /**
+     * 行内对账报告（非 JDBC 侧：没有整表可扫，按本轮读到的行与写出的行算键多重集）。
+     *
+     * @param rowsRead     读出行数
+     * @param rowsWritten  写出行数
+     * @param sourceSum    源侧键散列和
+     * @param targetSum    目标侧键散列和
+     * @return 对账报告
+     */
+    private ReconciliationReport inlineReport(long rowsRead, long rowsWritten,
+                                              long sourceSum, long targetSum) {
+        ReconciliationReport report = new ReconciliationReport();
+        report.setSourceCount(rowsRead);
+        report.setTargetCount(rowsWritten);
+        report.setSourceChecksum(Long.toHexString(sourceSum));
+        report.setTargetChecksum(Long.toHexString(targetSum));
+        report.setCountMatched(rowsRead == rowsWritten);
+        report.setChecksumMatched(sourceSum == targetSum);
+        return report;
     }
 
     /**

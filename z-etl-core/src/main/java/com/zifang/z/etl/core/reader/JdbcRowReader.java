@@ -27,7 +27,7 @@ import java.util.Map;
  *
  * @author zifang
  */
-public class JdbcRowReader implements RowReader {
+public class JdbcRowReader implements RowReader, PagedRowReader {
 
     private final DataSource dataSource;
     private final SourceSpec spec;
@@ -119,6 +119,7 @@ public class JdbcRowReader implements RowReader {
      * @return 读出的行数
      * @throws Exception 读取失败
      */
+    @Override
     public long readPages(PageHandler handler) throws Exception {
         long total = 0L;
         Connection connection = dataSource.getConnection();

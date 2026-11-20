@@ -21,7 +21,7 @@ z-etl/
 │       ├── pipeline/          流水线声明模型（PipelineSpec/Node/Edge + 解析 + 校验 + DAG 拓扑）
 │       ├── runtime/           流式执行内核（Record/Operator/StateBackend/TimerService/水位 + PipelineExecutor）
 │       ├── operator/          算子集（source/filter/map/script/aggregate/window.aggregate/dedup/join/union/sinks）
-│       ├── connector/         连接器（文件 CSV/JSON/XLSX、HTTP、内联、脚本、消息 + PullSource 骨架 + 类型推断）
+│       ├── connector/         连接器（文件 CSV/JSON/XLSX、HTTP、内联、脚本、消息 + PullSource 骨架 + 类型推断；线性层与 DAG 层共用）
 │       ├── optimize/          计划优化器（过滤下推 / 合并映射 / 死节点摘除 + explain()）
 │       ├── spi/               DataSourceProvider（数据源解析 SPI）+ MessageBus（消息总线 SPI）
 │       ├── reader/            取数器（分页游标 + 水位过滤 + SQL 下推 + 流式拉取 fetchNextPage）
@@ -67,6 +67,41 @@ job:
 ```
 
 JSON 形态写成同一份内容即可（`{"job": {...}}` 或直接是描述对象）。
+
+### 作业层的输入 / 输出类型（与 DAG 层同一批连接器）
+
+`source.type` / `target.type` 缺省是 `jdbc`；写成别的类型时，**跑的就是 DAG 层那个连接器算子**
+（不是另写一套实现），连接器私有配置放 `options`：
+
+```yaml
+job:
+  name: csv-to-api
+  mode: auto
+  source:
+    type: file.csv                       # jdbc（默认）/ file.csv / file.json / file.xlsx / http / inline / script / message
+    watermarkColumn: updated_at          # 非 JDBC 源的事件时间列 ⇒ 也能按水位自动切增量
+    options:                             # 连接器私有配置
+      path: /data/orders.csv
+      columnTypes: {amount: BIGDECIMAL, updated_at: TIMESTAMP}
+  transform:
+    fieldMappings:
+      - {source: id,         target: id,     type: LONG}
+      - {source: amount,     target: amount, type: BIGDECIMAL}
+  target:
+    type: http
+    options:
+      url: https://api.internal/orders
+  idempotencyKey: [id]
+  watermark:
+    column: updated_at
+    type: TIMESTAMP
+```
+
+- 非 JDBC 侧**不解析数据源引用**（`dataSourceRef` / `table` 不用写）；JDBC 专属配置
+  （`where` / `orderBy` / `pushdown` / `columns`）在非 JDBC 侧会被**直接报错**，不静默忽略。
+- 对账：两侧都是 JDBC 时走整表扫描（行数 + 键多重集校验和）；任一侧不是 JDBC 时走**本轮行内口径**
+  （源行 vs 写出行的幂等键多重集），履历里会注明。
+- 断点续传口径不变：页级提交（写成功才推进水位），文件 / HTTP / 消息源同样按「水位 + 平局列」接力。
 
 ## 转换链（四类算子 + 下推）
 
@@ -243,6 +278,9 @@ edges:
 **消息类输入输出走 SPI**（`com.zifang.z.etl.core.spi.MessageBus`）：宿主注入自己的实现即可换成
 Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_message_outbox` 表当队列，跨进程可读）。
 
+**两条路共用同一批连接器**：DAG 层写 `type: file.csv.source`，线性作业层写 `source.type: file.csv`
+—— 落到的是同一个算子类，行为一致（同一份文件解析、同一套水位口径、同一套增量过滤）。
+
 安全口径与线性作业完全一致：LUA/JS 硬拒绝；GROOVY 走 z-script 沙箱（墙钟超时 + 产出上限）；
 标识符全过 `Identifiers` 白名单；聚合函数白名单。
 
@@ -335,7 +373,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 69 个用例（core 67 + web 2）
+mvn -o test              # 73 个用例（core 71 + web 2）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -25,7 +25,7 @@ import java.util.Map;
  *
  * @author zifang
  */
-public class JdbcUpsertWriter implements RowWriter {
+public class JdbcUpsertWriter implements JobWriter {
 
     private final DataSource dataSource;
     private final TargetSpec spec;
@@ -93,6 +93,7 @@ public class JdbcUpsertWriter implements RowWriter {
     }
 
     /** 关闭（先冲刷）。 */
+    @Override
     public void close() {
         try {
             if (statement != null) {

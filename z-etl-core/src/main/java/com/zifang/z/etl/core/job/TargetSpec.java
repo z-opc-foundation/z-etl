@@ -7,6 +7,12 @@ package com.zifang.z.etl.core.job;
  */
 public class TargetSpec {
 
+    /** 连接器类型（默认 {@code jdbc}；其余复用 DAG 层的同一套连接器）。 */
+    private String type = "jdbc";
+
+    /** 连接器私有配置（{@code path} / {@code url} / {@code topic} …）。 */
+    private java.util.Map<String, Object> options = new java.util.LinkedHashMap<String, Object>();
+
     /** 数据源引用（z-dms DataSourceDef 的 ref / 名称）。 */
     private String dataSourceRef;
 
@@ -21,6 +27,27 @@ public class TargetSpec {
 
     /** 目标表列；为空表示由字段映射推导。 */
     private java.util.List<String> columns;
+
+    /** 连接器类型（缺省 jdbc）。 */
+    public String effectiveType() {
+        return type == null || type.trim().isEmpty() ? "jdbc" : type.trim().toLowerCase();
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public java.util.Map<String, Object> getOptions() {
+        return options;
+    }
+
+    public void setOptions(java.util.Map<String, Object> options) {
+        this.options = options == null ? new java.util.LinkedHashMap<String, Object>() : options;
+    }
 
     public String getDataSourceRef() {
         return dataSourceRef;

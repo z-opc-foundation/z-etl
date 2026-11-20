@@ -1,5 +1,7 @@
 package com.zifang.z.etl.core.job;
 
+import com.zifang.z.etl.core.connector.ConnectorTypes;
+import com.zifang.z.etl.core.pipeline.OperatorType;
 import com.zifang.util.db.support.Identifiers;
 
 import java.util.ArrayList;
@@ -48,10 +50,19 @@ public final class JobDescriptorValidator {
         if (source == null) {
             errors.add("source 不能为空");
         } else {
-            if (isBlank(source.getDataSourceRef())) {
-                errors.add("source.dataSourceRef 不能为空");
+            String sourceType = source.effectiveType();
+            OperatorType resolvedSource = ConnectorTypes.sourceType(sourceType);
+            if (resolvedSource == null) {
+                errors.add("source.type 不支持: " + source.getType());
+            } else if (ConnectorTypes.isJdbc(sourceType)) {
+                if (isBlank(source.getDataSourceRef())) {
+                    errors.add("source.dataSourceRef 不能为空");
+                }
+                checkTable(errors, "source.table", source.getTable());
+            } else {
+                checkConnectorOptions(errors, "source", resolvedSource, source.getOptions());
+                checkJdbcOnlyFields(errors, "source", source);
             }
-            checkTable(errors, "source.table", source.getTable());
             if (source.getPageSize() <= 0) {
                 errors.add("source.pageSize 必须为正数");
             }
@@ -70,16 +81,30 @@ public final class JobDescriptorValidator {
         if (target == null) {
             errors.add("target 不能为空");
         } else {
-            if (isBlank(target.getDataSourceRef())) {
-                errors.add("target.dataSourceRef 不能为空");
+            String targetType = target.effectiveType();
+            OperatorType resolvedTarget = ConnectorTypes.sinkType(targetType);
+            if (resolvedTarget == null) {
+                errors.add("target.type 不支持: " + target.getType());
+            } else if (ConnectorTypes.isJdbc(targetType)) {
+                if (isBlank(target.getDataSourceRef())) {
+                    errors.add("target.dataSourceRef 不能为空");
+                }
+                checkTable(errors, "target.table", target.getTable());
+                String writeMode = target.getWriteMode() == null ? "upsert" : target.getWriteMode().trim().toLowerCase();
+                if (!"upsert".equals(writeMode) && !"insert".equals(writeMode)) {
+                    errors.add("target.writeMode 非法（可用: upsert / insert），实际值: " + target.getWriteMode());
+                }
+            } else {
+                checkConnectorOptions(errors, "target", resolvedTarget, target.getOptions());
+                if (!isBlank(target.getTable())) {
+                    errors.add("target.table 只对 JDBC 目标有效（非 JDBC 目标请用 options）");
+                }
+                if (!isBlank(target.getDataSourceRef())) {
+                    errors.add("target.dataSourceRef 只对 JDBC 目标有效（非 JDBC 目标请用 options）");
+                }
             }
-            checkTable(errors, "target.table", target.getTable());
             if (target.getBatchSize() <= 0) {
                 errors.add("target.batchSize 必须为正数");
-            }
-            String writeMode = target.getWriteMode() == null ? "upsert" : target.getWriteMode().trim().toLowerCase();
-            if (!"upsert".equals(writeMode) && !"insert".equals(writeMode)) {
-                errors.add("target.writeMode 非法（可用: upsert / insert），实际值: " + target.getWriteMode());
             }
         }
         if (descriptor.getIdempotencyKey().isEmpty()) {
@@ -273,6 +298,36 @@ public final class JobDescriptorValidator {
                 if (!Identifiers.isSafe(aggregate.effectiveAlias())) {
                     errors.add("source.pushdown.aggregates 含非法别名: " + aggregate.effectiveAlias());
                 }
+            }
+        }
+    }
+
+    /**
+     * JDBC 专属字段校验：非 JDBC 源上声明了 {@code where} / {@code orderBy} / {@code pushdown}
+     * 会**静默不生效** ⇒ 直接报错，别让人以为下推生效了。
+     */
+    private static void checkJdbcOnlyFields(List<String> errors, String side, SourceSpec source) {
+        if (!isBlank(source.getWhere())) {
+            errors.add(side + ".where 只对 JDBC 源有效（非 JDBC 源请用 options 里的过滤条件）");
+        }
+        if (!isBlank(source.getOrderBy())) {
+            errors.add(side + ".orderBy 只对 JDBC 源有效");
+        }
+        if (source.getPushdown() != null) {
+            errors.add(side + ".pushdown 只对 JDBC 源有效（过滤 / 聚合下推是 SQL 口径）");
+        }
+        if (source.getColumns() != null && !source.getColumns().isEmpty()) {
+            errors.add(side + ".columns 只对 JDBC 源有效（非 JDBC 源的投影请写 options.columns）");
+        }
+    }
+
+    /** 连接器必填项校验（缺项直接报错，不静默跑空）。 */
+    private static void checkConnectorOptions(List<String> errors, String side, OperatorType type,
+                                              java.util.Map<String, Object> options) {
+        for (String key : ConnectorTypes.requiredOptions(type)) {
+            Object value = options == null ? null : options.get(key);
+            if (value == null || String.valueOf(value).trim().isEmpty()) {
+                errors.add(side + ".options." + key + " 不能为空（类型 " + type.id() + " 需要它）");
             }
         }
     }

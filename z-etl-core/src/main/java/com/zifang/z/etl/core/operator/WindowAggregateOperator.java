@@ -5,6 +5,7 @@ import com.zifang.z.etl.core.runtime.Keys;
 import com.zifang.z.etl.core.runtime.Operator;
 import com.zifang.z.etl.core.runtime.OperatorContext;
 import com.zifang.z.etl.core.runtime.Output;
+import com.zifang.z.etl.core.runtime.OutputTag;
 import com.zifang.z.etl.core.runtime.Record;
 import com.zifang.z.etl.core.runtime.StateBackend;
 import com.zifang.z.etl.core.runtime.TimeWindow;
@@ -49,6 +50,9 @@ public class WindowAggregateOperator implements Operator {
 
     private OperatorContext context;
     private Output currentOutput;
+
+    /** 迟到侧输出的标签（声明 lateTo 才有；null = 只丢计数）。 */
+    private OutputTag lateTag;
     private long lastWatermark = Long.MIN_VALUE;
 
     public WindowAggregateOperator(PipelineNode node) {
@@ -101,6 +105,10 @@ public class WindowAggregateOperator implements Operator {
         }
         allowedLateness = Durations.parseMillis(node.string("allowedLateness"), 0L);
         emitWindowBounds = node.bool("emitWindowBounds", true);
+        String lateTo = node.string("lateTo");
+        if (lateTo != null && !lateTo.trim().isEmpty()) {
+            lateTag = new com.zifang.z.etl.core.runtime.OutputTag(lateTo.trim());
+        }
         if (ctx.state() == null) {
             throw new IllegalStateException("window.aggregate 节点 " + node.getId() + " 需要键控状态，但没有分配到状态存储");
         }
@@ -126,6 +134,10 @@ public class WindowAggregateOperator implements Operator {
                     : window(windows, groupKey, candidate);
             if (target.fired && lastWatermark > target.end + allowedLateness) {
                 context.count("late-dropped");
+                if (lateTag != null) {
+                    // 侧输出：被丢的迟到行有去处（原行原样给旁路节点），不只丢个计数
+                    output.collect(lateTag, record);
+                }
                 saveWindows(windows);
                 continue;
             }

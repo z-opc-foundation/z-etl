@@ -289,7 +289,7 @@ edges:
 | `assert` | 变换 | **数据质量闸**：逐行判定 + 流结束结算；违规可失败 / 走旁路 / 只计数 | `mode/rejectedTo/expression/engine/inRange/allowedValues/notNullRate/unique/minRows/maxRows/exactRows` |
 | `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次） | `keyBy/aggregates: [{fn,column,alias}]` |
-| `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发 | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/aggregates` |
+| `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发；`lateTo` 把**超窗丢弃的迟到行**原样走侧输出（有去处，不只丢计数） | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/lateTo/aggregates` |
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间） | `keyBy/keep/ttl` |
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀；`leftKey`/`rightKey` 列名允许不同（按位置取值关联） | `left/right/leftKey/rightKey/joinType/rightSuffix` |
 | `interval.join` | 有状态 | **区间连接**（Flink IntervalJoin 口径）：两路按「关联键 + 事件时间之差 ≤ within」两两配对，每对只发一次；水位到期清理缓存 | `left/right/leftKey/rightKey/within/joinType/rightSuffix` |
@@ -405,7 +405,7 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 |---|---|
 | 执行模型 | 单线程推送（源拉一条 → 沿 DAG 推到底），定序确定 ⇒ 结果可复现；多源轮询拉取 |
 | 水位 | 全局水位 = 各**活跃**源水位的最小值；源结束不再拖住水位；无事件时间的记录不阻塞（归全局窗口） |
-| 窗口 | `[start, end)` 左闭右开；session 窗口相交自动合并；窗口触发后同键再迟到 ⇒ `allowedLateness` 内重算重发，之外丢弃并计数 |
+| 窗口 | `[start, end)` 左闭右开；session 窗口相交自动合并；窗口触发后同键再迟到 ⇒ `allowedLateness` 内重算重发，之外丢弃并计数；`lateTo` 声明后丢弃的迟到行**原样走侧输出**（标签 id = 目标节点 id，与 filter 的 `rejectedTo` 同一套旁路口径） |
 | 键控状态 | `ValueState/ListState/MapState`（堆实现，按算子隔离，`setCurrentKey` 口径与 Flink 一致） |
 | 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
 | 区间连接 | `interval.join`：两边都缓存，事件时间相差 ≤ `within` 的行按关联键两两配对（后到触发，每对只发一次）；水位 − within 之前的缓存清掉；没事件时间的行丢弃并计数 |
@@ -517,7 +517,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 164 个用例（core 161 + web 3）
+mvn -o test              # 168 个用例（core 165 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

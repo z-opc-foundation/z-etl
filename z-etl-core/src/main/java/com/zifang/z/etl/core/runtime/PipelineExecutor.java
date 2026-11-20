@@ -266,6 +266,11 @@ public class PipelineExecutor {
                     throw new IllegalArgumentException("节点 " + node.getId() + " 的 rejectedTo 指向不存在的节点: "
                             + rejectedTo);
                 }
+                String lateTo = node.string("lateTo");
+                if (lateTo != null && !index.containsKey(lateTo)) {
+                    throw new IllegalArgumentException("节点 " + node.getId() + " 的 lateTo 指向不存在的节点: "
+                            + lateTo);
+                }
             }
 
             // —— 边 → 派发路由 ——

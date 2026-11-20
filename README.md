@@ -290,7 +290,7 @@ edges:
 | `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次） | `keyBy/aggregates: [{fn,column,alias}]` |
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发；`lateTo` 把**超窗丢弃的迟到行**原样走侧输出（有去处，不只丢计数） | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/lateTo/aggregates` |
-| `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间） | `keyBy/keep/ttl` |
+| `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间）；`duplicateTo` 把被挤掉的行原样走侧输出（有去处，不只丢计数） | `keyBy/keep/ttl/duplicateTo` |
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀；`leftKey`/`rightKey` 列名允许不同（按位置取值关联） | `left/right/leftKey/rightKey/joinType/rightSuffix` |
 | `interval.join` | 有状态 | **区间连接**（Flink IntervalJoin 口径）：两路按「关联键 + 事件时间之差 ≤ within」两两配对，每对只发一次；水位到期清理缓存 | `left/right/leftKey/rightKey/within/joinType/rightSuffix` |
 | `dim.join` | 有状态 | **维表关联**（Flink broadcast-state 口径）：右流即维表（同键替换**热更新**、只进状态不下传），声明 `ttl` 按水位过期陈旧条目，`select` 投影维表列 | `left/right/leftKey/rightKey/select/ttl/joinType` |
@@ -517,7 +517,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 168 个用例（core 165 + web 3）
+mvn -o test              # 172 个用例（core 169 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

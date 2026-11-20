@@ -220,6 +220,44 @@ class CepPatternOperatorTest {
         assertTrue(error.getMessage().contains("steps"), "应点名 steps: " + error.getMessage());
     }
 
+    @Test
+    @DisplayName("中间步骤量词 times: '1,' —— 中步可重复，后到事件产出两种长度的匹配")
+    void middleStepLoop() throws Exception {
+        String yaml = ""
+                + "name: cep-middle\n"
+                + "nodes:\n"
+                + "  - id: src\n"
+                + "    type: inline.source\n"
+                + "    config:\n"
+                + "      rows:\n"
+                + "        - {order_id: 1, type: CREATE}\n"
+                + "        - {order_id: 1, type: SHIP, batch: 1}\n"
+                + "        - {order_id: 1, type: SHIP, batch: 2}\n"
+                + "        - {order_id: 1, type: DELIVER}\n"
+                + "  - id: cep\n"
+                + "    type: cep.pattern\n"
+                + "    config:\n"
+                + "      keyBy: [order_id]\n"
+                + "      steps:\n"
+                + "        - {name: create, expression: \"type == 'CREATE'\"}\n"
+                + "        - {name: ship, expression: \"type == 'SHIP'\", times: \"1,\"}\n"
+                + "        - {name: deliver, expression: \"type == 'DELIVER'\"}\n"
+                + "  - id: out\n"
+                + "    type: collect.sink\n"
+                + "edges:\n"
+                + "  - {from: src, to: cep}\n"
+                + "  - {from: cep, to: out}\n";
+        PipelineRunResult result = run(yaml);
+        List<Map<String, Object>> rows = rowsOf(result);
+        // 保守口径：旧中步还能被后续事件推进 ⇒ ship# 1 与 ship# 2 两种长度的匹配都产出
+        // （续吃版在部分匹配表前头 ⇒ ship# 2 的先出）
+        assertEquals(2, rows.size());
+        assertEquals(Integer.valueOf(2), rows.get(0).get("ship#"));
+        assertEquals(Integer.valueOf(1), rows.get(1).get("ship#"));
+        assertEquals(Integer.valueOf(1), rows.get(0).get("ship.batch"), "ship 步的列取该步第一条事件（batch 1）");
+        assertEquals("DELIVER", rows.get(0).get("deliver.type"));
+    }
+
     private final Map<String, com.zifang.z.etl.core.runtime.Operator> captured =
             new LinkedHashMap<String, com.zifang.z.etl.core.runtime.Operator>();
 

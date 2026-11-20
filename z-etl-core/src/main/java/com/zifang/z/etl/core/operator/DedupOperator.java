@@ -34,6 +34,9 @@ public class DedupOperator implements Operator {
     private long ttl;
     private OperatorContext context;
 
+    /** 重复侧输出的标签（声明 duplicateTo 才有；null = 只丢计数）。 */
+    private com.zifang.z.etl.core.runtime.OutputTag duplicateTag;
+
     public DedupOperator(PipelineNode node) {
         this.node = node;
     }
@@ -48,6 +51,10 @@ public class DedupOperator implements Operator {
         String keep = node.string("keep", "first").toLowerCase();
         keepFirst = !"last".equals(keep);
         ttl = Durations.parseMillis(node.string("ttl"), 0L);
+        String duplicateTo = node.string("duplicateTo");
+        if (duplicateTo != null && !duplicateTo.trim().isEmpty()) {
+            duplicateTag = new com.zifang.z.etl.core.runtime.OutputTag(duplicateTo.trim());
+        }
         if (ctx.state() == null) {
             throw new IllegalStateException("dedup 节点 " + node.getId() + " 需要键控状态，但没有分配到状态存储");
         }
@@ -78,6 +85,10 @@ public class DedupOperator implements Operator {
         if (keepFirst) {
             if (seen != null) {
                 context.count("dropped");
+                if (duplicateTag != null) {
+                    // 侧输出：被挤掉的行有去处（原行原样给旁路节点），不只丢个计数
+                    output.collect(duplicateTag, record);
+                }
                 return;
             }
             output.collect(record);

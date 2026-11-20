@@ -271,6 +271,11 @@ public class PipelineExecutor {
                     throw new IllegalArgumentException("节点 " + node.getId() + " 的 lateTo 指向不存在的节点: "
                             + lateTo);
                 }
+                String duplicateTo = node.string("duplicateTo");
+                if (duplicateTo != null && !index.containsKey(duplicateTo)) {
+                    throw new IllegalArgumentException("节点 " + node.getId() + " 的 duplicateTo 指向不存在的节点: "
+                            + duplicateTo);
+                }
             }
 
             // —— 边 → 派发路由 ——

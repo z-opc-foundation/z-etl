@@ -126,10 +126,17 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
                 result = result.merge(side);
             }
         }
-        // 迟到侧输出：被丢的迟到行原样进旁路 ⇒ 同样并入上游需求
+        // 迟到侧输出 / 重复侧输出：被丢的行原样进旁路 ⇒ 同样并入上游需求
         String lateTo = node.string("lateTo");
         if (lateTo != null) {
             ColumnNeed side = need.get(lateTo);
+            if (side != null) {
+                result = result.merge(side);
+            }
+        }
+        String duplicateTo = node.string("duplicateTo");
+        if (duplicateTo != null) {
+            ColumnNeed side = need.get(duplicateTo);
             if (side != null) {
                 result = result.merge(side);
             }

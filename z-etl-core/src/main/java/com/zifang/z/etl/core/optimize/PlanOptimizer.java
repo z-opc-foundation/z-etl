@@ -1,6 +1,7 @@
 package com.zifang.z.etl.core.optimize;
 
 import com.zifang.z.etl.core.pipeline.PipelineNode;
+import com.zifang.z.etl.core.pipeline.PipelineParser;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
 
@@ -11,15 +12,17 @@ import java.util.Map;
 /**
  * 计划优化器（DataFusion 的优化循环形状：固定顺序跑一轮改写规则）。
  *
- * <p>规则清单（默认三条，都保守）：
+ * <p>规则清单（默认四条，都保守）：
  * <ol>
  *   <li>{@link PushDownFilterRewriter}：SQL 谓词推回源库 WHERE；</li>
+ *   <li>{@link ProjectionPushdownRewriter}：下游用得上的列回推到源库 SELECT 列表；</li>
  *   <li>{@link MergeMapRewriter}：相邻 map 合一；</li>
  *   <li>{@link EliminateUnusedRewriter}：摘除到不了汇的死节点。</li>
  * </ol>
  *
- * <p>刻意**不做**投影下推：filter / map / script 的 EL/GROOVY 表达式引用了哪些列
- * 静态不可知，猜错列就是静默丢数据 —— 宁可不推（这条边界写在 README）。
+ * <p>投影下推的保守口径（错了就是静默丢数据）：只对 {@code jdbc.source} 生效、
+ * 源必须已声明列清单、链上必须有 {@code field.mapping} 收敛输出列、水位列与平局列必保。
+ * 任何一条不满足就不裁剪，并在 explain 的备注里说明原因。
  *
  * @author zifang
  */
@@ -29,6 +32,7 @@ public class PlanOptimizer {
 
     public PlanOptimizer() {
         rewriters.add(new PushDownFilterRewriter());
+        rewriters.add(new ProjectionPushdownRewriter());
         rewriters.add(new MergeMapRewriter());
         rewriters.add(new EliminateUnusedRewriter());
     }
@@ -91,7 +95,8 @@ public class PlanOptimizer {
      * @return 计划文本
      */
     public String explain(PipelineSpec spec) {
-        Optimized optimized = optimize(spec);
+        // 优化会改写声明 ⇒ 先拷贝，别把调用方的对象改了
+        Optimized optimized = optimize(PipelineParser.copyOf(spec));
         PipelineSpec plan = optimized.spec();
         StringBuilder sb = new StringBuilder();
         sb.append("pipeline: ").append(plan.getName()).append(" (mode=").append(plan.getMode()).append(")\n");
@@ -119,6 +124,10 @@ public class PlanOptimizer {
                 append(sb, "table", node.string("table"));
                 append(sb, "where", node.string("where"));
                 append(sb, "eventTime", node.string("eventTimeColumn"));
+                List<String> columns = node.strings("columns");
+                if (!columns.isEmpty()) {
+                    sb.append(" columns=").append(String.join(",", columns));
+                }
                 break;
             case FILTER:
                 append(sb, "expr", node.string("expression"));

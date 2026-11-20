@@ -113,6 +113,16 @@ public final class PipelineParser {
         return spec;
     }
 
+    /**
+     * 声明深拷贝（优化器会改写声明 ⇒ 优化前先拷贝一份，别把调用方的对象改了）。
+     *
+     * @param spec 原声明
+     * @return 拷贝
+     */
+    public static PipelineSpec copyOf(PipelineSpec spec) {
+        return parseJson(toJson(spec));
+    }
+
     /** 声明对象 → canonical JSON（落库用；键序稳定，便于 diff 与幂等比较）。 */
     public static String toJson(PipelineSpec spec) {
         try {

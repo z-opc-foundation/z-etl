@@ -296,8 +296,9 @@ public class EtlEngine {
         } finally {
             try {
                 writer.close();
-            } catch (Exception ignore) {
-                // 关闭异常不影响主异常
+            } catch (Exception closeError) {
+                // 收尾失败**不许**顶掉主异常（否则运维看到的失败原因会被带偏）
+                result.addNote("收尾失败（不影响本次失败原因）: " + closeError.getMessage());
             }
             if (connectorSource != null) {
                 try {

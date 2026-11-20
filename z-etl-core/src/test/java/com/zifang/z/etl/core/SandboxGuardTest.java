@@ -69,7 +69,9 @@ class SandboxGuardTest {
         runaway.setEngine("GROOVY");
         runaway.setTimeoutMs(Long.valueOf(300L));
         runaway.setMaxOutputChars(Integer.valueOf(256));
-        runaway.setScript("def i = 0\nwhile (i < 100000000) { i = i + 1 }\ni\n");
+        // 真死循环（不是「跑很久的有限循环」）：超时必须由沙箱来兜，
+        // 否则机器一忙超时线程被拖慢、脚本自己跑完了 ⇒ 用例变成看运气
+        runaway.setScript("def i = 0\nwhile (true) { i = i + 1 }\ni\n");
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> engine().run(descriptorWithScript("transform-timeout", runaway)));

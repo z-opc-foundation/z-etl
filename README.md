@@ -331,8 +331,17 @@ Kafka / RocketMQ；不注入时用默认实现 `JdbcMessageBus`（落 `etl_messa
 | `PushDownFilterRewriter` | filter 节点显式声明的 SQL 谓词（`config.sql`）并入源 WHERE | 只沿「行保持」链（filter/map/script(落列)/type.normalize）上溯；链上有 `field.mapping` 就不推；EL/GROOVY **不翻译**成 SQL，不猜 |
 | `MergeMapRewriter` | 相邻两个 `map` 并成一个（列清单合并，语义等价：表达式都在累积行上求值） | 上游有扇出/扇入不并 |
 | `EliminateUnusedRewriter` | 到不了任何汇的死节点摘掉 | `rejectedTo` 指名的节点不算死 |
+| `ProjectionPushdownRewriter` | 下游用得上的列回推到源库 SELECT 列表 | 只对 `jdbc.source` 生效；源必须**已声明列清单**；链上必须有 `field.mapping` 收敛输出列；**水位列 / 平局列必保**；join / 整行脚本 / 多路异构合并不裁 |
 
-**刻意不做投影下推**：EL/GROOVY 表达式引用了哪些列静态不可知，猜错列就是静默丢数据 —— 宁可不推。
+**投影下推的保守边界**（错了就是静默丢数据，所以逐条设卡）：
+1. 只对 `jdbc.source` 生效 —— SQL 投影是确定的；文件 / HTTP / 消息源的 `columns` 语义各不相同，不碰；
+2. 源**必须已声明列清单**：裁剪结果是「声明列 ∩ 需要的列」⇒ SQL 一定有效；没声明（全列）就不裁；
+3. 链上必须有 `field.mapping`（整行替换语义 ⇒ 输出列确定 ⇒ 下游要什么才清晰）；没有它就不裁；
+4. `eventTimeColumn` 与 `resume.tiebreakColumn` **必保** —— 裁掉 ⇒ 水位失效 ⇒ 增量悄悄变全量；
+5. `join` / `script(mode=row)` / 多路异构合并 ⇒ 列集合不可知，不裁；
+6. 表达式 / 脚本里的列引用按**候选**提取（不排除关键字），最终与源声明列求交 ⇒ 误判只会多留一列，不会少留。
+
+**运行时就会优化**：执行器跑之前先做一遍优化（改写副本，不动调用方的声明），优化备注写进运行结果。
 计划长什么样跑之前可以看：`new PlanOptimizer().explain(spec)`（拓扑序文本计划 + 优化备注）。
 
 ### 与 z-wf 的编排分工（管道之间归流程引擎）
@@ -404,7 +413,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 87 个用例（core 84 + web 3）
+mvn -o test              # 93 个用例（core 90 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

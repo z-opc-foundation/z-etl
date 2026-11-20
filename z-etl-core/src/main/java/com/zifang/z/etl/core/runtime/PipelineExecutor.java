@@ -4,7 +4,9 @@ import com.zifang.z.etl.core.checkpoint.Checkpoint;
 import com.zifang.z.etl.core.checkpoint.CheckpointStore;
 import com.zifang.z.etl.core.checkpoint.WatermarkCursor;
 import com.zifang.z.etl.core.operator.OperatorFactory;
+import com.zifang.z.etl.core.optimize.PlanOptimizer;
 import com.zifang.z.etl.core.pipeline.PipelineEdge;
+import com.zifang.z.etl.core.pipeline.PipelineParser;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
@@ -123,11 +125,18 @@ public class PipelineExecutor {
     public PipelineRunResult execute(PipelineSpec spec,
                                      Map<String, com.zifang.z.etl.core.runtime.Operator> operatorCapture) throws Exception {
         long start = System.currentTimeMillis();
-        PipelineValidator.validate(spec);
+        // —— 计划优化（过滤下推 / 投影下推 / 合并映射 / 摘死节点）——
+        // 优化会改写声明 ⇒ 先深拷贝一份，别把调用方的对象改了
+        PlanOptimizer.Optimized optimized = new PlanOptimizer().optimize(PipelineParser.copyOf(spec));
+        PipelineSpec plan = optimized.spec();
+        PipelineValidator.validate(plan);
 
         PipelineRunResult result = new PipelineRunResult();
-        result.setPipelineName(spec.getName());
-        String mode = spec.getMode() == null ? "auto" : spec.getMode().trim().toLowerCase();
+        result.setPipelineName(plan.getName());
+        for (String note : optimized.notes()) {
+            result.addNote(note);
+        }
+        String mode = plan.getMode() == null ? "auto" : plan.getMode().trim().toLowerCase();
         result.setMode(mode);
         result.setStartedAt(start);
         lastSeenWatermark = Long.MIN_VALUE;
@@ -135,10 +144,10 @@ public class PipelineExecutor {
         // —— 状态快照恢复（mode=init 例外：清掉从头跑）——
         if (stateStore != null) {
             if ("init".equals(mode)) {
-                stateStore.clear(spec.getName());
+                stateStore.clear(plan.getName());
                 result.addNote("mode=init：清掉状态快照，从头跑");
             } else {
-                byte[] snapshot = stateStore.load(spec.getName());
+                byte[] snapshot = stateStore.load(plan.getName());
                 if (snapshot != null && snapshot.length > 0) {
                     stateBackend.restore(snapshot);
                     result.setRestored(true);
@@ -148,25 +157,25 @@ public class PipelineExecutor {
         }
 
         // —— 水位游标（断点续传的「读到哪了」）——
-        Checkpoint checkpoint = checkpointStore == null ? null : checkpointStore.load(spec.getName());
+        Checkpoint checkpoint = checkpointStore == null ? null : checkpointStore.load(plan.getName());
         if ("incremental".equals(mode)
                 && (checkpoint == null || checkpoint.getWatermarkValue() == null
                 || checkpoint.getWatermarkValue().trim().isEmpty())) {
-            throw new IllegalStateException("流水线 " + spec.getName()
+            throw new IllegalStateException("流水线 " + plan.getName()
                     + " 声明为 incremental 但没有水位记录（先跑一次全量，或改 mode=auto）");
         }
         if ("init".equals(mode) && checkpointStore != null) {
-            checkpointStore.clear(spec.getName());
+            checkpointStore.clear(plan.getName());
             checkpoint = null;
         }
         result.setWatermarkBefore(checkpoint == null ? null : checkpoint.getWatermarkValue());
 
         // —— 建图 ——
         Map<String, PipelineNode> index = new LinkedHashMap<String, PipelineNode>();
-        for (PipelineNode node : spec.getNodes()) {
+        for (PipelineNode node : plan.getNodes()) {
             index.put(node.getId(), node);
         }
-        List<String> topo = PipelineValidator.topologicalOrder(spec, index);
+        List<String> topo = PipelineValidator.topologicalOrder(plan, index);
 
         List<PullSource> sources = new ArrayList<PullSource>();
         List<String> sourceIds = new ArrayList<String>();
@@ -196,7 +205,7 @@ public class PipelineExecutor {
             }
 
             // 旁路输出的目标节点必须存在（开跑前挑出来，不等到运行时静默丢）
-            for (PipelineNode node : spec.getNodes()) {
+            for (PipelineNode node : plan.getNodes()) {
                 String rejectedTo = node.string("rejectedTo");
                 if (rejectedTo != null && !index.containsKey(rejectedTo)) {
                     throw new IllegalArgumentException("节点 " + node.getId() + " 的 rejectedTo 指向不存在的节点: "
@@ -207,7 +216,7 @@ public class PipelineExecutor {
             // —— 边 → 派发路由 ——
             for (String id : topo) {
                 List<EdgeRoute> routes = new ArrayList<EdgeRoute>();
-                for (PipelineEdge edge : spec.edgesFrom(id)) {
+                for (PipelineEdge edge : plan.edgesFrom(id)) {
                     routes.add(new EdgeRoute(edge.getFrom(), edge.getTo()));
                 }
                 nodeOutputs.put(id, new FanoutOutput(id, routes));
@@ -253,7 +262,7 @@ public class PipelineExecutor {
 
             // —— 状态快照落库 ——
             if (stateStore != null) {
-                stateStore.save(spec.getName(), stateBackend.snapshot());
+                stateStore.save(plan.getName(), stateBackend.snapshot());
             }
 
             // —— 水位游标落库 ——
@@ -268,7 +277,7 @@ public class PipelineExecutor {
                 String value = WatermarkCursor.format(checkpointValue, type);
                 String tiebreakValue = source.lastTiebreakValue() == null
                         ? null : String.valueOf(source.lastTiebreakValue());
-                checkpointStore.save(new Checkpoint(spec.getName(), checkpointColumn, type, value,
+                checkpointStore.save(new Checkpoint(plan.getName(), checkpointColumn, type, value,
                         source.tiebreakColumn(), tiebreakValue, mode, System.currentTimeMillis()));
                 result.setWatermarkAfter(value);
             }

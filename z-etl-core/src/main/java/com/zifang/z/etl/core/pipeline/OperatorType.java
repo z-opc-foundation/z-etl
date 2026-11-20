@@ -37,6 +37,9 @@ public enum OperatorType {
     /** 消息源（Kafka / 库表队列，经 MessageBus SPI）。 */
     MESSAGE_SOURCE("message.source", Kind.SOURCE),
 
+    /** 子管道引用源（把已登记的管道当视图复用：汇换收集、不碰水位状态、参数透传）。 */
+    PIPELINE_REF("pipeline.ref", Kind.SOURCE),
+
     /** 过滤（表达式为真才放行；未命中可走旁路输出）。 */
     FILTER("filter", Kind.TRANSFORM),
 
@@ -231,6 +234,10 @@ public enum OperatorType {
         if ("mq.source".equals(normalized) || "queue.source".equals(normalized)
                 || "kafka.source".equals(normalized)) {
             return MESSAGE_SOURCE;
+        }
+        if ("pipeline".equals(normalized) || "sub.pipeline".equals(normalized)
+                || "pipeline.include".equals(normalized)) {
+            return PIPELINE_REF;
         }
         // 输出类型别名
         if ("csv.sink".equals(normalized) || "file.csv.out".equals(normalized)) {

@@ -111,6 +111,13 @@ public final class PipelineValidator {
                             + node.getId() + " 下推声明不合法: " + String.join("; ", pushdownErrors));
                 }
             }
+            if (type == OperatorType.PIPELINE_REF) {
+                String ref = node.string("name");
+                if (ref == null || ref.trim().isEmpty()) {
+                    throw new IllegalArgumentException("pipeline.ref 节点 " + node.getId()
+                            + " 必须声明 config.name（要引用的管道名）");
+                }
+            }
             if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
                         || type == OperatorType.DIM_JOIN) {
                 if (in.size() != 2) {

@@ -22,6 +22,7 @@ import com.zifang.z.etl.core.runtime.Output;
 import com.zifang.z.etl.core.runtime.Record;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
+import com.zifang.z.etl.core.spi.PipelineRefResolver;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 
 /**
@@ -60,6 +61,21 @@ public final class OperatorFactory {
      */
     public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox,
                                   MessageBus messageBus) {
+        return create(node, provider, sandbox, messageBus, null);
+    }
+
+    /**
+     * 按节点声明建算子（带消息总线与管道解析）。
+     *
+     * @param node       节点声明
+     * @param provider   数据源解析（源 / 汇用）
+     * @param sandbox    脚本沙箱（filter / map / script 用）
+     * @param messageBus 消息总线（消息类源 / 汇用；可空 ⇒ 用到时报错说明）
+     * @param resolver   管道解析（pipeline.ref 源用；可空 ⇒ 引用节点打开时报错说明）
+     * @return 算子实例
+     */
+    public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox,
+                                  MessageBus messageBus, PipelineRefResolver resolver) {
         OperatorType type = node.getOperatorType();
         if (type == null) {
             type = OperatorType.fromId(node.getType());
@@ -86,6 +102,8 @@ public final class OperatorFactory {
                 return new ScriptSource(node, sandbox);
             case MESSAGE_SOURCE:
                 return new MessageSource(node, messageBus);
+            case PIPELINE_REF:
+                return new PipelineRefSource(node, provider, sandbox, resolver);
             case FILTER:
                 return new FilterOperator(node, sandbox);
             case MAP:

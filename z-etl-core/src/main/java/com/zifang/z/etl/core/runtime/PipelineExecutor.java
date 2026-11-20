@@ -13,6 +13,7 @@ import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
+import com.zifang.z.etl.core.spi.PipelineRefResolver;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 
 import java.util.ArrayList;
@@ -45,6 +46,7 @@ public class PipelineExecutor {
     private final CheckpointStore checkpointStore;
     private final PipelineStateStore stateStore;
     private final MessageBus messageBus;
+    private final PipelineRefResolver resolver;
 
     /** 运行期建好的图（算子 id → 算子）。 */
     private final Map<String, com.zifang.z.etl.core.runtime.Operator> operators =
@@ -96,12 +98,29 @@ public class PipelineExecutor {
     public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
                             ScriptSandbox sandbox, CheckpointStore checkpointStore,
                             PipelineStateStore stateStore, MessageBus messageBus) {
+        this(dataSourceProvider, stateBackend, sandbox, checkpointStore, stateStore, messageBus, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析 SPI
+     * @param stateBackend       状态后端（键控状态放哪）
+     * @param sandbox            脚本沙箱（filter / map / script 用）
+     * @param checkpointStore    水位游标存储（断点续传用；可空）
+     * @param stateStore         状态快照存储（键控状态落库用；可空）
+     * @param messageBus         消息总线（消息类源 / 汇用；可空）
+     * @param resolver           管道解析（pipeline.ref 源用；可空 ⇒ 引用节点打开时报错说明）
+     */
+    public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
+                            ScriptSandbox sandbox, CheckpointStore checkpointStore,
+                            PipelineStateStore stateStore, MessageBus messageBus,
+                            PipelineRefResolver resolver) {
         this.dataSourceProvider = dataSourceProvider;
         this.stateBackend = stateBackend;
         this.sandbox = sandbox;
         this.checkpointStore = checkpointStore;
         this.stateStore = stateStore;
         this.messageBus = messageBus;
+        this.resolver = resolver;
     }
 
     /**
@@ -221,7 +240,7 @@ public class PipelineExecutor {
                 com.zifang.z.etl.core.runtime.Operator operator =
                         dryRun && node.getOperatorType().isSink()
                                 ? new DryRunSink(node)
-                                : OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus);
+                                : OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus, resolver);
                 if (operator instanceof PullSource) {
                     PullSource source = (PullSource) operator;
                     if (checkpoint != null && checkpoint.getWatermarkValue() != null) {

@@ -279,6 +279,7 @@ edges:
 | `inline.source` | 源 | 声明里写死的静态行（字典 / 维表 / 夹具） | `rows: [{...}]/columnTypes` |
 | `script.source` | 源 | z-script 沙箱脚本**生成**数据 | `script/engine/name/timeoutMs/maxOutputChars` |
 | `message.source` | 源 | 从消息总线消费（Kafka / RocketMQ / 库表队列） | `topic/pollSize` |
+| `pipeline.ref` | 源 | **子管道引用**（管道当视图）：引用已登记管道，子管道的汇全部换成 collect（只取产出不落地）、不读不写水位与状态；`params` 透传占位符；嵌套超 8 层报错 | `name/params/eventTimeColumn` |
 | `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
 | `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
 | `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
@@ -512,7 +513,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 145 个用例（core 142 + web 3）
+mvn -o test              # 151 个用例（core 148 + web 3）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

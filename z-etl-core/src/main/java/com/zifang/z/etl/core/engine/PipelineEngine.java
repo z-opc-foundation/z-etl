@@ -16,6 +16,7 @@ import com.zifang.z.etl.core.runtime.PipelineRunResult;
 import com.zifang.z.etl.core.runtime.PipelineStateStore;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
+import com.zifang.z.etl.core.spi.PipelineRefResolver;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.util.Backoff;
 import com.zifang.z.etl.core.util.CronExpression;
@@ -178,20 +179,30 @@ public class PipelineEngine {
         }
         PipelineSpec spec = PipelineParams.resolve(PipelineParser.copyOf(stored), params);
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
-                new ScriptSandbox(), null, null, messageBus);
+                new ScriptSandbox(), null, null, messageBus, pipelineResolver());
         return executor.dryRun(spec, sampleRows);
     }
 
     /** 跑一次（不落履历）；重试与落履历由 {@link #run(String)} 负责。 */
     private PipelineRunResult runOnce(PipelineSpec spec) throws Exception {
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
-                new ScriptSandbox(), checkpointStore, stateStore, messageBus);
+                new ScriptSandbox(), checkpointStore, stateStore, messageBus, pipelineResolver());
         return executor.execute(spec);
     }
 
     /** 水位记录（断点续传的「读到哪了」）；没有返回 {@code null}。 */
     public Checkpoint watermark(String name) {
         return checkpointStore == null ? null : checkpointStore.load(name);
+    }
+
+    /** 管道解析：pipeline.ref 源按名取落库定义。 */
+    private PipelineRefResolver pipelineResolver() {
+        return new PipelineRefResolver() {
+            @Override
+            public PipelineSpec resolve(String name) {
+                return repository.find(name);
+            }
+        };
     }
 
     /**

@@ -48,15 +48,17 @@ public class AggregateDef {
         if (!Accumulator.FN_SUM.equals(fn) && !Accumulator.FN_COUNT.equals(fn)
                 && !Accumulator.FN_AVG.equals(fn) && !Accumulator.FN_MIN.equals(fn)
                 && !Accumulator.FN_MAX.equals(fn) && !Accumulator.FN_FIRST.equals(fn)
-                && !Accumulator.FN_LAST.equals(fn) && !Accumulator.FN_COLLECT_LIST.equals(fn)) {
+                && !Accumulator.FN_LAST.equals(fn) && !Accumulator.FN_COLLECT_LIST.equals(fn)
+                && !Accumulator.FN_COLLECT_SET.equals(fn)) {
             throw new IllegalArgumentException("聚合函数不在白名单内: " + fn
-                    + "（可用: SUM/COUNT/AVG/MIN/MAX/FIRST/LAST/COLLECT_LIST）");
+                    + "（可用: SUM/COUNT/AVG/MIN/MAX/FIRST/LAST/COLLECT_LIST/COLLECT_SET）");
         }
         if (column == null || column.isEmpty()) {
             throw new IllegalArgumentException("聚合声明缺少 column");
         }
-        if (Accumulator.FN_COLLECT_LIST.equals(fn) && "*".equals(column)) {
-            throw new IllegalArgumentException("COLLECT_LIST 要指名收哪一列（* 没意义）");
+        if ((Accumulator.FN_COLLECT_LIST.equals(fn) || Accumulator.FN_COLLECT_SET.equals(fn))
+                && "*".equals(column)) {
+            throw new IllegalArgumentException(fn + " 要指名收哪一列（* 没意义）");
         }
     }
 

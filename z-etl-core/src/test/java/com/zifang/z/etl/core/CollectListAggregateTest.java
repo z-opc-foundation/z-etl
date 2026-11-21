@@ -78,11 +78,45 @@ class CollectListAggregateTest {
     }
 
     @Test
+    @DisplayName("COLLECT_SET 去重收集：同值只收一次，保持插入序；快照照旧")
+    void collectSetDedup() throws Exception {
+        PipelineRunResult result = run(""
+                + "name: collect-set\n"
+                + "nodes:\n"
+                + "  - id: src\n"
+                + "    type: inline.source\n"
+                + "    config:\n"
+                + "      rows:\n"
+                + "        - {user: 甲, tag: a}\n"
+                + "        - {user: 甲, tag: a}\n"
+                + "        - {user: 甲, tag: b}\n"
+                + "  - id: agg\n"
+                + "    type: aggregate\n"
+                + "    config:\n"
+                + "      keyBy: [user]\n"
+                + "      aggregates:\n"
+                + "        - {fn: COLLECT_SET, column: tag, alias: tags}\n"
+                + "  - id: out\n"
+                + "    type: collect.sink\n"
+                + "edges:\n"
+                + "  - {from: src, to: agg}\n"
+                + "  - {from: agg, to: out}\n");
+        List<Map<String, Object>> rows = rowsOf(result);
+        assertEquals(3, rows.size());
+        assertEquals(list("a"), rows.get(0).get("tags"));
+        assertEquals(list("a"), rows.get(1).get("tags"), "同值只收一次");
+        assertEquals(list("a", "b"), rows.get(2).get("tags"), "插入序保持");
+    }
+
+    @Test
     @DisplayName("校验：COLLECT_LIST 收 * 报错；白名单报错文案带上 COLLECT_LIST")
     void validation() {
         IllegalArgumentException star = assertThrows(IllegalArgumentException.class,
                 () -> AggregateDef.from(aggregate("COLLECT_LIST", "*")));
         assertTrue(star.getMessage().contains("COLLECT_LIST"), star.getMessage());
+        IllegalArgumentException setStar = assertThrows(IllegalArgumentException.class,
+                () -> AggregateDef.from(aggregate("COLLECT_SET", "*")));
+        assertTrue(setStar.getMessage().contains("COLLECT_SET"), setStar.getMessage());
         AggregateDef def = AggregateDef.from(aggregate("COLLECT_LIST", "tag"));
         assertEquals("COLLECT_LIST", def.fn());
     }

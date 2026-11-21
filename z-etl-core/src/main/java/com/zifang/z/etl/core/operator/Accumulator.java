@@ -16,7 +16,8 @@ import java.util.List;
  *   <li>{@code COUNT}：计数；</li>
  *   <li>{@code MIN} / {@code MAX}：极值；</li>
  *   <li>{@code FIRST} / {@code LAST}：首值 / 末值；</li>
- *   <li>{@code COLLECT_LIST}：值收成数组（跳过 null，封顶 {@link #MAX_COLLECT}）。</li>
+ *   <li>{@code COLLECT_LIST} / {@code COLLECT_SET}：值收成数组（跳过 null，封顶
+ *       {@link #MAX_COLLECT}；SET 同值只收一次、保持插入序）。</li>
  * </ul>
  *
  * <p>数值一律走 {@link BigDecimal}：金额与浮点混算是 ETL 里最常见的一类静默错误，
@@ -44,6 +45,8 @@ public class Accumulator implements Serializable {
     public static final String FN_LAST = "LAST";
     /** 收集（值收成数组；跳过 null；配下游 explode 可「聚合再还原」）。 */
     public static final String FN_COLLECT_LIST = "COLLECT_LIST";
+    /** 去重收集（同 COLLECT_LIST 但同值只收一次，保持插入序）。 */
+    public static final String FN_COLLECT_SET = "COLLECT_SET";
 
     /** COLLECT_LIST 单键单窗口的收集上限（防状态撑爆；超出丢并计数）。 */
     public static final int MAX_COLLECT = 65536;
@@ -61,7 +64,7 @@ public class Accumulator implements Serializable {
     private Object first;
     private Object last;
     private boolean hasValue;
-    private List<Object> collected;
+    private java.util.Collection<Object> collected;
     private long collectDropped;
 
     /**
@@ -111,10 +114,11 @@ public class Accumulator implements Serializable {
         }
         hasValue = true;
         count++;
-        if (FN_COLLECT_LIST.equals(fn)) {
-            // 收集口径：跳过 null、数值归一、封顶防状态撑爆
+        if (FN_COLLECT_LIST.equals(fn) || FN_COLLECT_SET.equals(fn)) {
+            // 收集口径：跳过 null、数值归一、封顶防状态撑爆；SET 去重（插入序）
             if (collected == null) {
-                collected = new ArrayList<Object>();
+                collected = FN_COLLECT_SET.equals(fn)
+                        ? new java.util.LinkedHashSet<Object>() : new ArrayList<Object>();
             }
             if (collected.size() < MAX_COLLECT) {
                 collected.add(normalize(value));
@@ -218,7 +222,7 @@ public class Accumulator implements Serializable {
         if (FN_LAST.equals(fn)) {
             return last;
         }
-        if (FN_COLLECT_LIST.equals(fn)) {
+        if (FN_COLLECT_LIST.equals(fn) || FN_COLLECT_SET.equals(fn)) {
             // 快照口径：给拷贝，不把内部活列表的引用交出去（滚动聚合每行产出的应是当时状态）
             return collected == null ? new ArrayList<Object>() : new ArrayList<Object>(collected);
         }

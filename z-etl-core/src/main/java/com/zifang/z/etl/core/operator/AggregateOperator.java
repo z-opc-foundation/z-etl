@@ -95,6 +95,12 @@ public class AggregateOperator implements Operator {
         for (AggregateDef def : defs) {
             Accumulator accumulator = accumulators.get(def.alias());
             result.put(def.alias(), accumulator == null ? null : accumulator.result());
+            if (accumulator != null) {
+                long dropped = accumulator.collectDroppedDelta();
+                if (dropped > 0L) {
+                    context.count("collect-truncated", dropped);
+                }
+            }
         }
         context.count("emitted");
         output.collect(record.withRow(result));

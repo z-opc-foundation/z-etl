@@ -3,6 +3,8 @@ package com.zifang.z.etl.core.operator;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 聚合累加器（可序列化 ⇒ 能进检查点、能断点续跑）。
@@ -13,7 +15,8 @@ import java.math.RoundingMode;
  *   <li>{@code SUM} / {@code AVG}：求和 + 计数；</li>
  *   <li>{@code COUNT}：计数；</li>
  *   <li>{@code MIN} / {@code MAX}：极值；</li>
- *   <li>{@code FIRST} / {@code LAST}：首值 / 末值。</li>
+ *   <li>{@code FIRST} / {@code LAST}：首值 / 末值；</li>
+ *   <li>{@code COLLECT_LIST}：值收成数组（跳过 null，封顶 {@link #MAX_COLLECT}）。</li>
  * </ul>
  *
  * <p>数值一律走 {@link BigDecimal}：金额与浮点混算是 ETL 里最常见的一类静默错误，
@@ -39,6 +42,11 @@ public class Accumulator implements Serializable {
     public static final String FN_FIRST = "FIRST";
     /** 末值。 */
     public static final String FN_LAST = "LAST";
+    /** 收集（值收成数组；跳过 null；配下游 explode 可「聚合再还原」）。 */
+    public static final String FN_COLLECT_LIST = "COLLECT_LIST";
+
+    /** COLLECT_LIST 单键单窗口的收集上限（防状态撑爆；超出丢并计数）。 */
+    public static final int MAX_COLLECT = 65536;
 
     /** AVG 的结果小数位（默认 4，与旧引擎聚合下推的 {@code DECIMAL(18,4)} 对齐）。 */
     private static final int DEFAULT_AVG_SCALE = 4;
@@ -53,6 +61,8 @@ public class Accumulator implements Serializable {
     private Object first;
     private Object last;
     private boolean hasValue;
+    private List<Object> collected;
+    private long collectDropped;
 
     /**
      * @param fn     聚合函数
@@ -101,6 +111,18 @@ public class Accumulator implements Serializable {
         }
         hasValue = true;
         count++;
+        if (FN_COLLECT_LIST.equals(fn)) {
+            // 收集口径：跳过 null、数值归一、封顶防状态撑爆
+            if (collected == null) {
+                collected = new ArrayList<Object>();
+            }
+            if (collected.size() < MAX_COLLECT) {
+                collected.add(normalize(value));
+            } else {
+                collectDropped++;
+            }
+            return;
+        }
         BigDecimal numeric = toBigDecimal(value);
         if (numeric != null) {
             sum = sum == null ? numeric : sum.add(numeric);
@@ -154,6 +176,19 @@ public class Accumulator implements Serializable {
                 }
             }
         }
+        if (other.collected != null) {
+            if (collected == null) {
+                collected = new ArrayList<Object>();
+            }
+            for (Object item : other.collected) {
+                if (collected.size() >= MAX_COLLECT) {
+                    collectDropped++;
+                } else {
+                    collected.add(item);
+                }
+            }
+            collectDropped += other.collectDropped;
+        }
     }
 
     /**
@@ -183,7 +218,18 @@ public class Accumulator implements Serializable {
         if (FN_LAST.equals(fn)) {
             return last;
         }
+        if (FN_COLLECT_LIST.equals(fn)) {
+            // 快照口径：给拷贝，不把内部活列表的引用交出去（滚动聚合每行产出的应是当时状态）
+            return collected == null ? new ArrayList<Object>() : new ArrayList<Object>(collected);
+        }
         return null;
+    }
+
+    /** COLLECT_LIST 超上限被丢掉的个数（读后清零 —— 增量口径，供算子转计计数器）。 */
+    public long collectDroppedDelta() {
+        long delta = collectDropped;
+        collectDropped = 0L;
+        return delta;
     }
 
     /** 值归一：数值转 BigDecimal；其余转字符串（保证可序列化）。 */

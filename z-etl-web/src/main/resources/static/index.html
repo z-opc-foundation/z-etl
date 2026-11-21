@@ -77,6 +77,7 @@
     <div class="panel" id="pdetail">
       <h2>流水线详情 <span class="badge" id="pd-name">未选择</span></h2>
       <div class="row">
+        <button class="act primary" onclick="showDag()">拓扑图</button>
         <button class="act" onclick="showSpec()">定义</button>
         <button class="act" onclick="showPlan()">计划解释</button>
         <button class="act" onclick="showRuns()">运行履历</button>
@@ -136,6 +137,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let pipeline = null, job = null;
+let lastSpec = null, lastMetrics = null;
 
 function toast(msg, ok) {
   const t = $('toast');
@@ -243,7 +245,7 @@ async function refreshPipelines() {
   $('plist').innerHTML = names.length
     ? names.map(n => '<li data-n="' + esc(n) + '" class="' + (n === pipeline ? 'on' : '') + '"><span>' + esc(n) + '</span></li>').join('')
     : '<li style="color:var(--dim);cursor:default">（空）</li>';
-  $('plist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => { pipeline = li.dataset.n; $('pd-name').textContent = pipeline; refreshPipelines(); showSpec(); });
+  $('plist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => { pipeline = li.dataset.n; $('pd-name').textContent = pipeline; lastSpec = null; lastMetrics = null; refreshPipelines(); showDag(); });
 }
 
 async function registerSpec() {
@@ -251,7 +253,8 @@ async function registerSpec() {
     const data = await api('POST', '/api/etl/pipelines', $('spec').value, true);
     toast('已登记：' + data.name, true);
     pipeline = data.name; $('pd-name').textContent = pipeline;
-    await refreshPipelines(); showSpec();
+    lastSpec = null; lastMetrics = null;
+    await refreshPipelines(); showDag();
   } catch (e) { toast(e.message, false); }
 }
 
@@ -259,7 +262,118 @@ function needPipeline() { if (!pipeline) { toast('先在左侧选一条流水线
 function setBody(html) { $('pd-body').innerHTML = html; $('pd-extra').className = 'hidden'; }
 function extraPanel(html) { const x = $('pd-extra'); x.innerHTML = html; x.className = ''; }
 
-async function showSpec() { if (!needPipeline()) return; setBody('<h3 class="sec">定义</h3>' + jsonBlock(await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline)))); }
+/* ---------- DAG 拓扑图（纯 SVG，分层布局 + 运行指标叠加） ---------- */
+const KIND_STYLE = {
+  source:    { stroke: '#3fb96f', tag: '源' },
+  transform: { stroke: '#8a97a5', tag: '变换' },
+  stateful:  { stroke: '#4fa3ff', tag: '有状态' },
+  sink:      { stroke: '#d9a13f', tag: '汇' }
+};
+
+function kindOf(type) {
+  const t = String(type || '');
+  if (/source/.test(t)) return 'source';
+  if (/sink/.test(t)) return 'sink';
+  if (/^(aggregate|window\.aggregate|dedup|join|interval\.join|dim\.join|cep\.pattern)$/.test(t)) return 'stateful';
+  return 'transform';
+}
+
+async function fetchSpec() {
+  if (!lastSpec || lastSpec.name !== pipeline) {
+    lastSpec = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline));
+  }
+  return lastSpec;
+}
+
+async function showDag() {
+  if (!needPipeline()) return;
+  try {
+    const spec = await fetchSpec();
+    if (!lastMetrics) {
+      try {
+        const h = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/runs?limit=1');
+        if (h.runs && h.runs.length) lastMetrics = h.runs[0].nodeMetrics || null;
+      } catch (e2) { /* 无履历就空着画 */ }
+    }
+    setBody('<h3 class="sec">拓扑</h3><div id="dag-wrap">' + dagSvg(spec, lastMetrics) + '</div>'
+      + '<p style="font-size:11px;color:var(--dim)">边框色 = 算子类别（绿 源 / 灰 变换 / 蓝 有状态 / 橙 汇）；琥珀色节点 = 进出不等（行数被改写）；悬停看节点计数。运行 / 试跑后自动叠加最新指标。</p>'
+      + '<div style="display:flex;gap:14px;flex-wrap:wrap">'
+      + Object.keys(KIND_STYLE).map(k => '<span class="badge" style="border-color:' + KIND_STYLE[k].stroke + '">' + KIND_STYLE[k].tag + '</span>').join('')
+      + '<span class="badge" style="border-color:var(--warn)">行数变化</span></div>');
+  } catch (e) { toast(e.message, false); }
+}
+
+/** 最长路径分层 + 层内居中，返回 SVG 字符串。metrics 可为 null。 */
+function dagSvg(spec, metrics) {
+  const nodes = spec.nodes || [];
+  const edges = (spec.edges || []).filter(e => e && e.from !== e.to);
+  const byId = {};
+  nodes.forEach(n => byId[n.id] = n);
+
+  const layer = {};
+  nodes.forEach(n => layer[n.id] = 0);
+  for (let i = 0; i < nodes.length; i++) {
+    edges.forEach(e => {
+      if (layer[e.from] == null || layer[e.to] == null) return;
+      if (layer[e.to] < layer[e.from] + 1) layer[e.to] = layer[e.from] + 1;
+    });
+  }
+  const columns = [];
+  nodes.forEach(n => {
+    const L = layer[n.id] || 0;
+    (columns[L] = columns[L] || []).push(n);
+  });
+  while (columns.length && !columns[columns.length - 1]) columns.pop();
+
+  const NODE_W = 172, NODE_H = 54, GAP_X = 96, GAP_Y = 30, M = 16;
+  const maxRows = Math.max.apply(null, columns.map(c => c.length));
+  const W = M * 2 + columns.length * NODE_W + (columns.length - 1) * GAP_X;
+  const H = M * 2 + maxRows * NODE_H + (maxRows - 1) * GAP_Y;
+
+  const pos = {};
+  columns.forEach((col, L) => {
+    const colH = col.length * NODE_H + (col.length - 1) * GAP_Y;
+    col.forEach((n, i) => {
+      pos[n.id] = { x: M + L * (NODE_W + GAP_X), y: M + (H - M * 2 - colH) / 2 + i * (NODE_H + GAP_Y) };
+    });
+  });
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;background:var(--bg);border:1px solid var(--line);border-radius:8px">'
+    + '<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+    + '<path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6a7a"/></marker></defs>';
+
+  edges.forEach(e => {
+    const a = pos[e.from], b = pos[e.to];
+    if (!a || !b) return;
+    const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
+    const dx = Math.max(36, (x2 - x1) / 2);
+    svg += '<path d="M ' + x1 + ' ' + y1 + ' C ' + (x1 + dx) + ' ' + y1 + ', ' + (x2 - dx) + ' ' + y2 + ', ' + x2 + ' ' + y2
+      + '" fill="none" stroke="#5a6a7a" stroke-width="1.4" marker-end="url(#arw)"/>';
+  });
+
+  nodes.forEach(n => {
+    const p = pos[n.id];
+    const kind = kindOf(n.type);
+    const st = KIND_STYLE[kind];
+    const m = metrics ? metrics[n.id] : null;
+    const dropped = m && m['records-in'] != null && m['records-out'] != null && m['records-out'] < m['records-in'];
+    const stroke = dropped ? 'var(--warn)' : st.stroke;
+    const badge = m
+      ? '<text x="' + (p.x + NODE_W - 6) + '" y="' + (p.y + NODE_H - 7) + '" text-anchor="end" font-size="10" fill="#8a97a5">'
+        + esc('in ' + (m['records-in'] == null ? '—' : m['records-in']) + ' · out ' + (m['records-out'] == null ? '—' : m['records-out'])) + '</text>'
+      : '';
+    const tip = m ? Object.keys(m).map(k => esc(k) + '=' + esc(m[k])).join('\n') : '尚无运行指标';
+    svg += '<g title="' + esc(n.id) + '"><title>' + tip + '</title>'
+      + '<rect x="' + p.x + '" y="' + p.y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="9" '
+      + 'fill="var(--panel2)" stroke="' + stroke + '" stroke-width="1.5"/>'
+      + '<text x="' + (p.x + 10) + '" y="' + (p.y + 21) + '" font-size="12.5" font-weight="600" fill="var(--fg)">' + esc(n.id) + '</text>'
+      + '<text x="' + (p.x + 10) + '" y="' + (p.y + 37) + '" font-size="10.5" fill="' + st.stroke + '">' + esc(n.type) + '</text>'
+      + badge + '</g>';
+  });
+  return svg + '</svg>';
+}
+
+async function showSpec() { if (!needPipeline()) return; lastSpec = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline)); setBody('<h3 class="sec">定义</h3>' + jsonBlock(lastSpec)); }
 async function showPlan() { if (!needPipeline()) return; setBody('<h3 class="sec">计划解释</h3><pre>' + esc(await (await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/plan')).text()) + '</pre>'); }
 async function showRuns() {
   if (!needPipeline()) return;
@@ -314,7 +428,13 @@ async function runPipe(dry) {
   const path = '/api/etl/pipelines/' + encodeURIComponent(pipeline) + (dry ? '/dry-run?rows=100' : '/run');
   try {
     const r = body ? await api('POST', path, body) : await api('POST', path);
-    setBody('<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
+    lastMetrics = r.nodeMetrics || null;
+    if (lastSpec && lastSpec.name === pipeline) {
+      setBody('<h3 class="sec">拓扑（本轮指标已叠加）</h3><div id="dag-wrap">' + dagSvg(lastSpec, lastMetrics) + '</div>'
+        + '<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
+    } else {
+      setBody('<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
+    }
   } catch (e) { toast(e.message, false); }
 }
 

@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>z-etl 控制台</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#161d24; --panel2:#1c252e; --line:#2a3440;
+    --fg:#d8e0e8; --dim:#8a97a5; --acc:#4fa3ff; --ok:#3fb96f; --err:#e5636a; --warn:#d9a13f;
+    font-size:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{color:var(--dim);font-size:12px}
+  nav{display:flex;gap:4px;margin-left:24px}
+  nav button{background:none;border:1px solid transparent;color:var(--dim);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+  nav button.on{color:var(--fg);background:var(--panel2);border-color:var(--line)}
+  main{display:flex;gap:14px;padding:14px 18px;align-items:flex-start}
+  .col-left{width:380px;flex-shrink:0}
+  .col-right{flex:1;min-width:0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px}
+  .panel h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.05em}
+  textarea{width:100%;min-height:180px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical}
+  input[type=text]{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px}
+  button.act{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+  button.act:hover{border-color:var(--acc);color:var(--acc)}
+  button.act.primary{background:#1d3a5c;border-color:#2d5d94}
+  ul.list{list-style:none;margin:0;padding:0;max-height:260px;overflow:auto}
+  ul.list li{padding:6px 10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;font-size:13px}
+  ul.list li:hover{background:var(--panel2)}
+  ul.list li.on{background:#1d3a5c}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  table{border-collapse:collapse;width:100%;font-size:12px}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:600}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:420px;font-size:12px;line-height:1.5}
+  .toast{position:fixed;right:18px;bottom:18px;padding:10px 16px;border-radius:8px;font-size:13px;display:none;z-index:9;border:1px solid var(--line);background:var(--panel2)}
+  .toast.ok{border-color:var(--ok)} .toast.err{border-color:var(--err)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+  .kv b{color:var(--dim);font-weight:500}
+  .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
+  .hidden{display:none}
+  h3.sec{font-size:13px;margin:14px 0 8px;color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>z-etl 控制台</h1>
+  <span class="sub" id="envinfo"></span>
+  <nav>
+    <button data-tab="pipe" class="on">流水线</button>
+    <button data-tab="sched">调度</button>
+    <button data-tab="job">作业</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ 流水线 ============ -->
+  <section id="tab-pipe" class="col-left">
+    <div class="panel">
+      <h2>登记流水线（yml / JSON 原文）</h2>
+      <textarea id="spec" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="act primary" onclick="registerSpec()">登记</button>
+        <button class="act" onclick="loadDemo()">示例</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>流水线列表</h2>
+      <ul class="list" id="plist"></ul>
+    </div>
+  </section>
+  <section id="tab-pipe-r" class="col-right">
+    <div class="panel" id="pdetail">
+      <h2>流水线详情 <span class="badge" id="pd-name">未选择</span></h2>
+      <div class="row">
+        <button class="act" onclick="showSpec()">定义</button>
+        <button class="act" onclick="showPlan()">计划解释</button>
+        <button class="act" onclick="showRuns()">运行履历</button>
+        <button class="act" onclick="showWatermark()">水位</button>
+        <button class="act" onclick="exportSavepoint()">导出保存点</button>
+        <button class="act" onclick="showSched()">调度登记</button>
+      </div>
+      <div class="row">
+        <button class="act primary" onclick="runPipe(false)">运行</button>
+        <button class="act" onclick="runPipe(true)">试跑（不落地）</button>
+        <input type="text" id="run-params" placeholder='运行参数 JSON，如 {"bizdate":"2026-11-21"}（可空）' style="flex:1;min-width:220px"/>
+      </div>
+      <div id="pd-extra" class="hidden"></div>
+      <div id="pd-body"></div>
+    </div>
+  </section>
+
+  <!-- ============ 调度 ============ -->
+  <section id="tab-sched" class="col-right hidden" style="flex:1">
+    <div class="panel">
+      <h2>全部调度登记</h2>
+      <div id="sched-body">加载中…</div>
+    </div>
+  </section>
+
+  <!-- ============ 作业 ============ -->
+  <section id="tab-job" class="col-left hidden">
+    <div class="panel">
+      <h2>登记作业（yml / JSON 原文）</h2>
+      <textarea id="jobdesc" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="act primary" onclick="registerJob()">登记</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>作业列表</h2>
+      <ul class="list" id="jlist"></ul>
+    </div>
+  </section>
+  <section id="tab-job-r" class="col-right hidden">
+    <div class="panel">
+      <h2>作业详情 <span class="badge" id="jd-name">未选择</span></h2>
+      <div class="row">
+        <button class="act" onclick="showJob()">作业描述</button>
+        <button class="act primary" onclick="runJob()">运行（首跑全量，之后增量）</button>
+        <button class="act" onclick="showJobRuns()">运行履历</button>
+        <button class="act" onclick="showJobWatermark()">水位</button>
+      </div>
+      <div id="jd-body"></div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let pipeline = null, job = null;
+
+function toast(msg, ok) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (ok ? 'ok' : 'err');
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = 'none', 4000);
+}
+
+async function api(method, path, body, raw) {
+  const opt = { method, headers: {} };
+  if (body !== undefined && body !== null) {
+    if (raw) { opt.headers['Content-Type'] = 'text/plain'; opt.body = body; }
+    else { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  }
+  const res = await fetch(path, opt);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch (e) { data = text; }
+  if (!res.ok) {
+    const msg = data && data.message ? data.message : (data && data.error ? data.error : String(text).slice(0, 300));
+    throw new Error('HTTP ' + res.status + '：' + msg);
+  }
+  return data;
+}
+
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function jsonBlock(v) { return '<pre>' + esc(typeof v === 'string' ? v : JSON.stringify(v, null, 2)) + '</pre>'; }
+
+function kvTable(obj) {
+  const rows = Object.keys(obj || {}).map(k => '<tr><th>' + esc(k) + '</th><td>' + esc(
+    typeof obj[k] === 'object' && obj[k] !== null ? JSON.stringify(obj[k]) : obj[k]) + '</td></tr>').join('');
+  return '<table>' + rows + '</table>';
+}
+
+/* ---------- 结果渲染：运行结果 + 节点指标 ---------- */
+function renderRunResult(r) {
+  if (!r || typeof r !== 'object') return jsonBlock(r);
+  const metrics = r.nodeMetrics || {};
+  let table = '<table><tr><th>节点</th><th>records-in</th><th>records-out</th><th>其余计数</th></tr>';
+  Object.keys(metrics).forEach(n => {
+    const m = metrics[n] || {};
+    const rest = Object.keys(m).filter(k => k !== 'records-in' && k !== 'records-out' && k !== 'elapsed-nanos')
+      .map(k => esc(k) + '=' + m[k]).join('，');
+    table += '<tr><td>' + esc(n) + '</td><td>' + (m['records-in'] == null ? '—' : m['records-in'])
+      + '</td><td>' + (m['records-out'] == null ? '—' : m['records-out']) + '</td><td>' + (rest || '—') + '</td></tr>';
+  });
+  table += '</table>';
+  const head = '<div class="kv">'
+    + '<b>读 / 写</b><span>' + r.recordsRead + ' / ' + r.recordsWritten + '</span>'
+    + '<b>模式</b><span>' + esc(r.mode || '—') + (r.restored ? '（恢复自状态快照）' : '') + '</span>'
+    + '<b>水位</b><span>' + esc(r.watermarkBefore == null ? '—' : r.watermarkBefore) + ' → ' + esc(r.watermarkAfter == null ? '—' : r.watermarkAfter) + '</span>'
+    + '</div>'
+    + ((r.notes && r.notes.length) ? '<p style="color:var(--warn);font-size:12px">' + r.notes.map(esc).join('；') + '</p>' : '');
+  return head + '<h3 class="sec">节点指标</h3>' + table;
+}
+
+/* ---------- 标签页 ---------- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  ['pipe', 'sched', 'job'].forEach(t => {
+    $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab);
+    const r = $('tab-' + t + '-r');
+    if (r) r.classList.toggle('hidden', t !== b.dataset.tab);
+  });
+  if (b.dataset.tab === 'sched') loadSchedules();
+  if (b.dataset.tab === 'job') refreshJobs().catch(e => toast('作业列表加载失败：' + e.message, false));
+});
+
+/* ---------- 流水线 ---------- */
+const DEMO_TEXT = [
+  'name: demo-',
+  'nodes:',
+  '  - id: src',
+  '    type: inline.source',
+  '    config:',
+  '      rows:',
+  '        - {id: 1, user: 甲, amount: 100}',
+  '        - {id: 2, user: 乙, amount: 200}',
+  '        - {id: 3, user: 甲, amount: 300}',
+  '  - id: uq',
+  '    type: distinct',
+  '    config:',
+  '      columns: [user]',
+  '  - id: agg',
+  '    type: aggregate',
+  '    config:',
+  '      keyBy: [user]',
+  '      aggregates:',
+  '        - {fn: SUM, column: amount, alias: total}',
+  '  - id: out',
+  '    type: collect.sink',
+  'edges:',
+  '  - {from: src, to: uq}',
+  '  - {from: uq, to: agg}',
+  '  - {from: agg, to: out}',
+].join('\n');
+
+function loadDemo() { $('spec').value = DEMO_TEXT; }
+
+async function refreshPipelines() {
+  const data = await api('GET', '/api/etl/pipelines');
+  const names = data.pipelines || [];
+  $('plist').innerHTML = names.length
+    ? names.map(n => '<li data-n="' + esc(n) + '" class="' + (n === pipeline ? 'on' : '') + '"><span>' + esc(n) + '</span></li>').join('')
+    : '<li style="color:var(--dim);cursor:default">（空）</li>';
+  $('plist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => { pipeline = li.dataset.n; $('pd-name').textContent = pipeline; refreshPipelines(); showSpec(); });
+}
+
+async function registerSpec() {
+  try {
+    const data = await api('POST', '/api/etl/pipelines', $('spec').value, true);
+    toast('已登记：' + data.name, true);
+    pipeline = data.name; $('pd-name').textContent = pipeline;
+    await refreshPipelines(); showSpec();
+  } catch (e) { toast(e.message, false); }
+}
+
+function needPipeline() { if (!pipeline) { toast('先在左侧选一条流水线', false); return false; } return true; }
+function setBody(html) { $('pd-body').innerHTML = html; $('pd-extra').className = 'hidden'; }
+function extraPanel(html) { const x = $('pd-extra'); x.innerHTML = html; x.className = ''; }
+
+async function showSpec() { if (!needPipeline()) return; setBody('<h3 class="sec">定义</h3>' + jsonBlock(await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline)))); }
+async function showPlan() { if (!needPipeline()) return; setBody('<h3 class="sec">计划解释</h3><pre>' + esc(await (await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/plan')).text()) + '</pre>'); }
+async function showRuns() {
+  if (!needPipeline()) return;
+  const data = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/runs?limit=20');
+  const runs = data.runs || [];
+  setBody('<h3 class="sec">运行履历（最近 ' + runs.length + ' 次）</h3>' + (runs.length
+    ? runs.map((r, i) => '<details' + (i === 0 ? ' open' : '') + '><summary style="cursor:pointer;padding:4px 0">'
+      + new Date(r.startedAt).toLocaleString() + ' · ' + esc(r.mode) + ' · 读 ' + r.recordsRead + ' 写 ' + r.recordsWritten + '</summary>'
+      + renderRunResult(r) + '</details>').join('')
+    : '<p style="color:var(--dim)">还没有运行记录</p>'));
+}
+async function showWatermark() {
+  if (!needPipeline()) return;
+  const res = await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/watermark');
+  setBody('<h3 class="sec">水位记录</h3>' + (res.status === 404 ? '<p style="color:var(--dim)">还没有水位（没跑过增量）</p>' : kvTable(await res.json())));
+}
+async function exportSavepoint() {
+  if (!needPipeline()) return;
+  try {
+    const sp = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/savepoint');
+    extraPanel('<h3 class="sec">保存点报文（复制保存，灌回用）</h3><textarea id="sp-json" style="min-height:220px">' + esc(JSON.stringify(sp, null, 2)) + '</textarea>'
+      + '<div class="row" style="margin-top:8px"><button class="act" onclick="copySp()">复制</button></div>');
+  } catch (e) { toast(e.message, false); }
+}
+function copySp() { $('sp-json').select(); document.execCommand('copy'); toast('已复制', true); }
+async function showSched() {
+  if (!needPipeline()) return;
+  const res = await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/schedule');
+  const cur = res.status === 404 ? null : await res.json();
+  extraPanel('<h3 class="sec">调度登记</h3>'
+    + '<p style="font-size:12px;color:var(--dim)">' + (cur ? '当前：cron <code>' + esc(cur.cronExpression) + '</code>，' + (cur.enabled ? '已启用' : '已停用') : '未登记') + '</p>'
+    + '<div class="row"><input type="text" id="sched-cron" placeholder="cron 表达式（分 时 日 月 周），如 0 0 2 * * ?" style="flex:1;min-width:200px"/>'
+    + '<button class="act primary" onclick="saveSched()">保存</button>'
+    + (cur ? '<button class="act" onclick="delSched()">取消调度</button>' : '') + '</div>');
+}
+async function saveSched() {
+  try {
+    const cron = $('sched-cron').value.trim();
+    const r = await api('POST', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/schedule?enabled=true', cron, true);
+    toast('调度已登记，下次触发：' + (r.nextFireTime || '—'), true); showSched();
+  } catch (e) { toast(e.message, false); }
+}
+async function delSched() {
+  try { await api('DELETE', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/schedule'); toast('调度已取消', true); showSched(); }
+  catch (e) { toast(e.message, false); }
+}
+async function runPipe(dry) {
+  if (!needPipeline()) return;
+  const paramsRaw = $('run-params').value.trim();
+  let body;
+  if (paramsRaw) { try { body = JSON.parse(paramsRaw); } catch (e) { toast('运行参数不是合法 JSON：' + e.message, false); return; } }
+  const path = '/api/etl/pipelines/' + encodeURIComponent(pipeline) + (dry ? '/dry-run?rows=100' : '/run');
+  try {
+    const r = body ? await api('POST', path, body) : await api('POST', path);
+    setBody('<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
+  } catch (e) { toast(e.message, false); }
+}
+
+/* ---------- 调度总览 ---------- */
+async function loadSchedules() {
+  try {
+    const data = await api('GET', '/api/etl/pipelines/schedules');
+    const list = data.schedules || [];
+    $('sched-body').innerHTML = list.length
+      ? '<table><tr><th>流水线</th><th>cron</th><th>启用</th><th>上次触发</th><th>下次触发</th></tr>'
+        + list.map(s => '<tr><td>' + esc(s.pipelineName) + '</td><td><code>' + esc(s.cronExpression) + '</code></td><td>'
+          + (s.enabled ? '是' : '否') + '</td><td>' + (s.lastTriggeredAt ? new Date(s.lastTriggeredAt).toLocaleString() : '—')
+          + '</td><td>' + (s.nextFireTime ? new Date(s.nextFireTime).toLocaleString() : '—') + '</td></tr>').join('') + '</table>'
+      : '<p style="color:var(--dim)">没有调度登记</p>';
+  } catch (e) { $('sched-body').innerHTML = '<p style="color:var(--err)">' + esc(e.message) + '</p>'; }
+}
+
+/* ---------- 作业 ---------- */
+async function refreshJobs() {
+  const data = await api('GET', '/api/etl/jobs');
+  const names = data.jobs || [];
+  $('jlist').innerHTML = names.length
+    ? names.map(n => '<li data-n="' + esc(n) + '" class="' + (n === job ? 'on' : '') + '"><span>' + esc(n) + '</span></li>').join('')
+    : '<li style="color:var(--dim);cursor:default">（空）</li>';
+  $('jlist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => { job = li.dataset.n; $('jd-name').textContent = job; refreshJobs(); showJob(); });
+}
+async function registerJob() {
+  try {
+    const data = await api('POST', '/api/etl/jobs', $('jobdesc').value, true);
+    toast('已登记：' + data.name, true); job = data.name; $('jd-name').textContent = job;
+    await refreshJobs(); showJob();
+  } catch (e) { toast(e.message, false); }
+}
+function needJob() { if (!job) { toast('先在左侧选一个作业', false); return false; } return true; }
+async function showJob() { if (!needJob()) return; $('jd-body').innerHTML = '<h3 class="sec">作业描述</h3>' + jsonBlock(await api('GET', '/api/etl/jobs/' + encodeURIComponent(job))); }
+async function runJob() {
+  if (!needJob()) return;
+  try { $('jd-body').innerHTML = '<h3 class="sec">运行中…</h3>'; $('jd-body').innerHTML = '<h3 class="sec">运行结果</h3>' + renderRunResult(await api('POST', '/api/etl/jobs/' + encodeURIComponent(job) + '/run')); }
+  catch (e) { toast(e.message, false); $('jd-body').innerHTML = ''; }
+}
+async function showJobRuns() {
+  if (!needJob()) return;
+  const data = await api('GET', '/api/etl/jobs/' + encodeURIComponent(job) + '/runs?limit=20');
+  const runs = data.runs || [];
+  $('jd-body').innerHTML = '<h3 class="sec">运行履历</h3>' + (runs.length
+    ? '<table><tr><th>时间</th><th>模式</th><th>读</th><th>写</th><th>对账</th><th>水位</th></tr>'
+      + runs.map(r => '<tr><td>' + (r.startedAt ? new Date(r.startedAt).toLocaleString() : '—') + '</td><td>' + esc(r.mode || '')
+        + '</td><td>' + r.rowsRead + '</td><td>' + r.rowsWritten + '</td><td>' + (r.reconciled ? '是' : '否')
+        + '</td><td>' + esc(r.watermarkAfter || '—') + '</td></tr>').join('') + '</table>'
+    : '<p style="color:var(--dim)">还没有运行记录</p>');
+}
+async function showJobWatermark() {
+  if (!needJob()) return;
+  const res = await fetch('/api/etl/jobs/' + encodeURIComponent(job) + '/watermark');
+  $('jd-body').innerHTML = '<h3 class="sec">水位记录</h3>' + (res.status === 404 ? '<p style="color:var(--dim)">还没有水位</p>' : kvTable(await res.json()));
+}
+
+/* ---------- 启动 ---------- */
+(async function init() {
+  $('envinfo').textContent = '本机 ' + location.host + ' · 同源 API';
+  $('spec').value = DEMO_TEXT;
+  try { await refreshPipelines(); } catch (e) { toast('流水线列表加载失败：' + e.message, false); }
+})();
+</script>
+</body>
+</html>

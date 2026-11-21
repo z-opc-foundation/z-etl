@@ -412,7 +412,7 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 | 键控状态 | `ValueState/ListState/MapState`（堆实现，按算子隔离，`setCurrentKey` 口径与 Flink 一致） |
 | 定时器 | 事件时间定时器（水位驱动触发）+ 处理时间定时器 |
 | 区间连接 | `interval.join`：两边都缓存，事件时间相差 ≤ `within` 的行按关联键两两配对（后到触发，每对只发一次）；水位 − within 之前的缓存清掉；没事件时间的行丢弃并计数 |
-| 模式匹配 | `cep.pattern`：能延续旧匹配就延续、能开新匹配就开新匹配（同一事件两件事都做）；**推进即取代**（不做跳跃策略细分）；`optional` 步骤 0 或 1 次 —— 下一步是 optional 不吃/吃到都开「跳过」分支，两条路径都活着（宁多配不少配）；`strict` 紧邻度（声明在下一步上）—— 当前事件既不吃进也不推进 ⇒ 匹配死掉，缺省宽松；`notNext` 否定步 —— 不消费事件，未越过时违禁事件一到匹配即死（否定优先于续吃），拖尾的到流尾 flush 确认后才产出；`until` 命中的事件不吃进该步（部分匹配留着等推进，不销毁）；剩余步骤全 optional/notNext 的部分匹配在流尾 flush 时补产出（`flush-emitted`）；最后一步次数到下限即产出；`within` 声明后起步早于「水位 − within」的部分匹配清掉；每键部分匹配上限（缺省 64）防爆炸 |
+| 模式匹配 | `cep.pattern`：能延续旧匹配就延续、能开新匹配就开新匹配（同一事件两件事都做）；**推进即取代**（不做跳跃策略细分）；`optional` 步骤 0 或 1 次 —— 下一步是 optional 不吃/吃到都开「跳过」分支，两条路径都活着（宁多配不少配）；`strict` 紧邻度（声明在下一步上）—— 当前事件既不吃进也不推进 ⇒ 匹配死掉，缺省宽松；`notNext` 否定步 —— 不消费事件，未越过时违禁事件一到匹配即死（否定优先于续吃），拖尾的到流尾 flush 确认后才产出；`until` 命中的事件不吃进该步（部分匹配留着等推进，不销毁）；剩余步骤全 optional/notNext 的部分匹配在流尾 flush 时补产出（`flush-emitted`）；最后一步次数到下限即产出；`within` 声明后起步早于「水位 − within」的部分匹配清掉；每键部分匹配上限（缺省 64）防爆炸；**与 Flink CEP 的逐项对照与 skip 策略取舍见 `_doc/001_arch/01-cep-flink-口径对照.md`** |
 | 异步 IO | `async.map`：Flink AsyncFunction 口径 —— 请求并发在途，行到达时先发已完成的、在途到 `capacity` 才阻塞等一个（容量背压）；`ordered` 按行到达序 / `unordered` 完成即发；流结束 `flush(Output)`（endOfInput）把在途全部发出；失败缺省 fail fast，`onError: skip` 丢行并计数 |
 | 状态快照 | 跑完把全部键控状态序列化存进 `PipelineStateStore`（内存 / JDBC 落库），下轮恢复 |
 | 断点续传 | 复用线性作业的水位游标（复合游标 + 回溯窗口），跑完落 `Checkpoint`，下轮从水位接力 |

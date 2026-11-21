@@ -291,6 +291,7 @@ edges:
 | `explode` | 变换 | **炸行**（一行拆多行，Flink SQL 的 UNNEST 口径）：数组列逐元素出一行 / 字符串按 `delimiter` 切分；标量当单元素原样过；空数组/null 缺省丢并计数（`keepEmpty: true` 保留原行）；`target` 可把元素写新列、`indexColumn` 顺带写下标 | `column/target/indexColumn/delimiter/keepEmpty` |
 | `topn` | 变换 | **截断**（按键 / 全局 Top-N，Flink Rank 的保守子集；批口径：缓存到流尾才排序产出，适合文件/有限流）：数值列按数值比、其余按字符串比、null 视为最小；同值稳定；产出行原样 | `orderBy/order/limit/keyBy` |
 | `sample` | 变换 | **采样**（按比例放行，丢数据口径）：`seed` 声明后随机采样可复现；`hashBy` 按键哈希采样同键永远同判定（同一键的行要么全留要么全丢）且天然可复现；行原样放行只计数 | `rate/seed/hashBy` |
+| `distinct` | 变换 | **全行去重**（首次出现放行、重复丢掉）：缺省整行所有列拼指纹判重，`columns` 声明后按列子集；指纹超 `cap`（缺省 100000）后新行不再跟踪但**照常放行**并计数 `cap-overflow`（宁多放不漏放）；内存 set 不进键控状态（检查点不背） | `columns/cap` |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次）；函数白名单 `SUM/COUNT/AVG/MIN/MAX/FIRST/LAST/COLLECT_LIST/COLLECT_SET`（收集收成数组：跳过 null、产出为当时快照、单键封顶 65536 超出丢并计数 `collect-truncated`；SET 同值只收一次保持插入序；配下游 `explode` 可「聚合再还原」；SQL 下推不支持收集，仍限 `SUM/COUNT/AVG/MIN/MAX`） | `keyBy/aggregates: [{fn,column,alias}]` |
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发；`lateTo` 把**超窗丢弃的迟到行**原样走侧输出（有去处，不只丢计数） | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/lateTo/aggregates` |
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间）；`duplicateTo` 把被挤掉的行原样走侧输出（有去处，不只丢计数） | `keyBy/keep/ttl/duplicateTo` |
@@ -520,7 +521,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 211 个用例（core 205 + web 6）
+mvn -o test              # 215 个用例（core 209 + web 6）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

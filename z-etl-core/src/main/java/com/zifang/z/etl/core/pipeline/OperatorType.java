@@ -73,6 +73,9 @@ public enum OperatorType {
     /** 采样（按比例放行：随机可复现 / 按键哈希同键同判定）。 */
     SAMPLE("sample", Kind.TRANSFORM),
 
+    /** 全行去重（整行 / 列子集判重；内存指纹 set + 上限兜底，超出放行不漏放）。 */
+    DISTINCT("distinct", Kind.TRANSFORM),
+
     /** 键控聚合（无窗口，滚动累计值，键变化即发一次）。 */
     AGGREGATE("aggregate", Kind.STATEFUL),
 
@@ -201,6 +204,9 @@ public enum OperatorType {
         }
         if ("sampling".equals(normalized) || "mod.monitor".equals(normalized)) {
             return SAMPLE;
+        }
+        if ("unique".equals(normalized) || "dedup.row".equals(normalized)) {
+            return DISTINCT;
         }
         if ("groovy.script".equals(normalized) || "script.groovy".equals(normalized)) {
             return SCRIPT;

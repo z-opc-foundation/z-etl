@@ -104,6 +104,10 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
                 return ColumnNeed.all();
             }
         }
+        if (type == OperatorType.DISTINCT && node.strings("columns").isEmpty()) {
+            // 整行判重：指纹要所有列 ⇒ 不裁
+            return ColumnNeed.all();
+        }
         if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
                 || type == OperatorType.DIM_JOIN || type == OperatorType.CEP_PATTERN) {
             // 左右两路列名与列集合交织 / CEP 整行进部分匹配状态 ⇒ 不裁
@@ -212,6 +216,11 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
             String column = node.string("column");
             if (column != null && !column.trim().isEmpty()) {
                 columns.add(ColumnReferences.normalize(column.trim()));
+            }
+        } else if (type == OperatorType.DISTINCT) {
+            // 列子集判重：这几列必须活着传到它那儿
+            for (String column : node.strings("columns")) {
+                columns.add(ColumnReferences.normalize(column));
             }
         } else if (type == OperatorType.DEDUP
                 || type == OperatorType.AGGREGATE

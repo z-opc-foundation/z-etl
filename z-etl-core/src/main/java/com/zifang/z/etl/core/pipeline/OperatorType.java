@@ -76,6 +76,9 @@ public enum OperatorType {
     /** 全行去重（整行 / 列子集判重；内存指纹 set + 上限兜底，超出放行不漏放）。 */
     DISTINCT("distinct", Kind.TRANSFORM),
 
+    /** 列转行（melt：声明列逐列竖排成 名字列+值列，其余列原样保留；explode 的横向互补）。 */
+    UNPIVOT("unpivot", Kind.TRANSFORM),
+
     /** 键控聚合（无窗口，滚动累计值，键变化即发一次）。 */
     AGGREGATE("aggregate", Kind.STATEFUL),
 
@@ -207,6 +210,9 @@ public enum OperatorType {
         }
         if ("unique".equals(normalized) || "dedup.row".equals(normalized)) {
             return DISTINCT;
+        }
+        if ("melt".equals(normalized) || "columns.to.rows".equals(normalized)) {
+            return UNPIVOT;
         }
         if ("groovy.script".equals(normalized) || "script.groovy".equals(normalized)) {
             return SCRIPT;

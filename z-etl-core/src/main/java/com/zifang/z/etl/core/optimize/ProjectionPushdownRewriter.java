@@ -108,6 +108,10 @@ public class ProjectionPushdownRewriter implements PlanRewriter {
             // 整行判重：指纹要所有列 ⇒ 不裁
             return ColumnNeed.all();
         }
+        if (type == OperatorType.UNPIVOT) {
+            // 列转行：非熔炼列原样保留、熔炼列进值列 ⇒ 上下游都全要
+            return ColumnNeed.all();
+        }
         if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
                 || type == OperatorType.DIM_JOIN || type == OperatorType.CEP_PATTERN) {
             // 左右两路列名与列集合交织 / CEP 整行进部分匹配状态 ⇒ 不裁

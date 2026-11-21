@@ -142,6 +142,8 @@ public final class OperatorFactory {
                 return new SampleOperator(node);
             case DISTINCT:
                 return new DistinctOperator(node);
+            case UNPIVOT:
+                return new UnpivotOperator(node);
             case JDBC_SINK:
                 return new SinkOperators.JdbcSink(node, provider.resolve(node.string("dataSourceRef")));
             case FILE_CSV_SINK:

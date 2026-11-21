@@ -114,6 +114,7 @@ class EtlPipelineMetricsTest {
         assertNotNull(metrics.get("sink"), "汇节点指标在");
 
         assertEquals(Long.valueOf(5L), metrics.get("fm").get("records-in"), "变换收到 5 行");
+        assertEquals(Long.valueOf(5L), metrics.get("fm").get("records-out"), "变换发出 5 行（与 records-in 对称）");
         assertEquals(Long.valueOf(5L), metrics.get("sink").get("records-in"), "汇收到 5 行");
         assertNotNull(metrics.get("src").get("elapsed-nanos"), "源有耗时指标");
         for (String node : new String[] {"src", "fm", "sink"}) {

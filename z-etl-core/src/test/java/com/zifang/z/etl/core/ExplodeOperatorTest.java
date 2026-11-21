@@ -62,6 +62,8 @@ class ExplodeOperatorTest {
         assertEquals("c", rows.get(2).get("tags"));
         assertEquals(Integer.valueOf(2), rows.get(2).get("id"));
         assertEquals(Long.valueOf(1L), metrics(result).getOrDefault("exploded", 0L));
+        assertEquals(Long.valueOf(2L), metrics(result).get("records-in"), "进 2 行");
+        assertEquals(Long.valueOf(3L), metrics(result).get("records-out"), "出 3 行（行数膨胀可见）");
     }
 
     @Test

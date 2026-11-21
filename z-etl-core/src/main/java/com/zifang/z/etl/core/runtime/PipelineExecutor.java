@@ -539,6 +539,10 @@ public class PipelineExecutor {
 
         @Override
         public void collect(Record record) {
+            OperatorContext context = contexts.get(nodeId);
+            if (context != null && !routes.isEmpty()) {
+                context.count("records-out");
+            }
             for (EdgeRoute route : routes) {
                 route.deliver(record);
             }

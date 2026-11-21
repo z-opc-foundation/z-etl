@@ -240,7 +240,7 @@ PipelineSpec spec = PipelineParser.parse(yamlOrJson);
 PipelineRunResult result = new PipelineExecutor(dataSourceProvider).execute(spec);
 result.getRecordsRead();          // 读出行数
 result.getRecordsWritten();       // 写出行数
-result.getNodeMetrics();          // 每节点计数（records-in / elapsed-nanos 逐节点耗时 / side-output 等）
+result.getNodeMetrics();          // 每节点计数（records-in 下游视角 / records-out 自身发出 / elapsed-nanos 逐节点耗时 / side-output 等）
 result.getWatermarkAfter();       // 本轮落下的水位
 ```
 

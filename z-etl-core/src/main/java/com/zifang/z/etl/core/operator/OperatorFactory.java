@@ -10,6 +10,7 @@ import com.zifang.z.etl.core.connector.FileXmlSink;
 import com.zifang.z.etl.core.connector.FileXmlSource;
 import com.zifang.z.etl.core.connector.HttpSink;
 import com.zifang.z.etl.core.connector.HttpSource;
+import com.zifang.z.etl.core.connector.MillSource;
 import com.zifang.z.etl.core.connector.InlineSource;
 import com.zifang.z.etl.core.connector.MessageSink;
 import com.zifang.z.etl.core.connector.MessageSource;
@@ -96,6 +97,8 @@ public final class OperatorFactory {
                 return new FileXmlSource(node);
             case HTTP_SOURCE:
                 return new HttpSource(node);
+            case MILL_SOURCE:
+                return new MillSource(node);
             case INLINE_SOURCE:
                 return new InlineSource(node);
             case SCRIPT_SOURCE:
@@ -110,6 +113,8 @@ public final class OperatorFactory {
                 return new MapOperator(node, sandbox);
             case SCRIPT:
                 return new ScriptOperator(node, sandbox);
+            case SCRIPT_REMOTE:
+                return new ScriptRemoteOperator(node);
             case ASYNC_MAP:
                 return new AsyncMapOperator(node);
             case FIELD_MAPPING:
@@ -144,6 +149,26 @@ public final class OperatorFactory {
                 return new DistinctOperator(node);
             case UNPIVOT:
                 return new UnpivotOperator(node);
+            case REGEX_EXTRACT:
+                return new RegexExtractOperator(node);
+            case SPLIT:
+                return new SplitOperator(node);
+            case TEMPLATE:
+                return new TemplateOperator(node);
+            case RENAME:
+                return new RenameOperator(node);
+            case FLATTEN:
+                return new FlattenOperator(node);
+            case JSON_EXTRACT:
+                return new JsonExtractOperator(node);
+            case HASH:
+                return new HashOperator(node);
+            case MASK:
+                return new MaskOperator(node);
+            case DATE_FORMAT:
+                return new DateFormatOperator(node);
+            case SORT:
+                return new SortOperator(node);
             case JDBC_SINK:
                 return new SinkOperators.JdbcSink(node, provider.resolve(node.string("dataSourceRef")));
             case FILE_CSV_SINK:

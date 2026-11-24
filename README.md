@@ -276,6 +276,7 @@ edges:
 | `file.xlsx.source` | 源 | Excel 第一张工作表（**零依赖**：JDK 自带 zip + StAX；日期样式还原成 Timestamp） | `path/sheet/header/columns/columnTypes` |
 | `file.xml.source` | 源 | XML 文件（**零依赖** StAX 流式解析；`recordPath` 定位记录元素；属性成 `@列`，嵌套成 Map，重复子元素成 List） | `path/recordPath/encoding/columns/columnTypes/limit` |
 | `http.source` | 源 | REST / JSON 接口当流拉（`pageParam` 翻页到空页停，可限主机） | `url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts` |
+| `mill.source` | 源 | **资料磨坊源（打通 z-mill）**：全格式文档 / 网页 → 结构化行；`file` 走 multipart 上传 `POST /api/grind`、`url` 走 `POST /api/grind-url` 抓网页（二者必填其一）；`mode: chunk`（默认）按标题路径分块一块一行（`source/index/heading/path/text`，RAG 粒度直接进管道）、`mode: doc` 一文档一行带四形态成品（`markdown/json/text/html` + `format/blocks/chars`）；status≠ok 抛错不静默吞 | `baseUrl/file/url/mode/timeoutMs` |
 | `inline.source` | 源 | 声明里写死的静态行（字典 / 维表 / 夹具） | `rows: [{...}]/columnTypes` |
 | `script.source` | 源 | z-script 沙箱脚本**生成**数据 | `script/engine/name/timeoutMs/maxOutputChars` |
 | `message.source` | 源 | 从消息总线消费（Kafka / RocketMQ / 库表队列） | `topic/pollSize` |
@@ -283,6 +284,17 @@ edges:
 | `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
 | `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
 | `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
+| `script.remote` | 变换 | **平台脚本（打通 z-script 脚本中心）**：按 `scriptCode` 调已上线脚本（版本 / 灰度 / 配额 / 审计那套），整行 JSON 当执行参数，鉴权 `X-Api-Key`（app + AK 口径）；`success=false` 或 HTTP 非 2xx 抛错不静默吞；产出与本地脚本算子同形（column 落一列 / row 整行替换）。与本地 `script` 分工：现写的清洗逻辑用本地沙箱，沉淀到脚本中心的用本算子引用，改脚本不动管道 | `baseUrl/scriptCode/apiKey/mode/name/type/nullable/timeoutMs` |
+| `regex.extract` | 变换 | **正则提取**：声明列跑正则，捕获组落列（`outputs` 组名或序号 → 列名）；不匹配缺省输出列全 null 并计数 `no-match`，`onNoMatch: drop` 丢行 | `column/pattern/outputs/onNoMatch` |
+| `split` | 变换 | **分列**：声明列按 `separator` 切开落进 `names` 声明的输出列；段数不足补 null；缺省原列替换（`keepOriginal: true` 保留） | `column/separator/names/keepOriginal` |
+| `template` | 变换 | **模板合成**：`${列名}` 占位符把整行拼成字符串落 `name` 列；占位列缺 / null 给空串 | `template/name` |
+| `rename` | 变换 | **列改名**：`mapping`（旧列名 → 新列名）整行改名，其余列不动、顺序保持 | `mapping` |
+| `flatten` | 变换 | **拍平**：行里的嵌套 Map 拍成点路径列（`user.address.city`），数组不动；JSON 源 / 脚本产出落库前的最后一压 | `separator` |
+| `json.extract` | 变换 | **JSON 提取**：列内 JSON 文本当文档解析，`fields` 点路径取字段落列；解析失败缺省炸行，`onError: 'null'`（要带引号，裸 null 被 yml 吃成缺值）输出列全 null 并计数 `parse-error` | `column/fields/onError` |
+| `hash` | 变换 | **哈希**（指纹化 / 匿名化）：`columns` 各列做摘要，算法白名单 `SHA-256`（默认）/`SHA-1`/`MD5`；`salt` 拼值前防彩虹表；`suffix` 缺省原地覆盖，声明后保留原列加指纹列；null 保持 null | `columns/algorithm/salt/suffix` |
+| `mask` | 变换 | **脱敏**（给下游共享前的最后一道闸）：`masks` 列名 → 规则，`phone`（11 位保前 3 后 4）/`email`（保首字符与域名）/`half`（保前 1/4 其余 *）/`full`（全 *）；phone 规则碰非 11 位走 half 兜底；null 不动 | `masks` |
+| `date.format` | 变换 | **时间格式化**：epoch 毫秒 / ISO / `fromPattern` 自定义三口径输入 → `toPattern` 目标格式（缺省 `yyyy-MM-dd HH:mm:ss`）；`name` 缺省原地覆盖；解析失败炸行（静默 null 更危险）；Timestamp / Date 值直接吃 | `column/fromPattern/toPattern/name` |
+| `sort` | 变换 | **排序**（物化整流）：按 `columns` 多列排序（前缀 `-` 降序）；数值按数值比、其余按字符串（码点）序、null 排最后；⚠️ 要收齐全流才出第一行，只适合有界数据 | `columns` |
 | `async.map` | 变换 | **异步映射**（Flink AsyncFunction 口径）：每行异步外呼 HTTP 补列；`capacity` 容量背压（在途满阻塞等一个）、`outputMode` ordered/unordered、流结束 flush 把在途全发出；`onError` fail/skip | `url({列}模板)/method/headers/bodyColumns/fields/timeoutMs/capacity/outputMode/onError/allowedHosts` |
 | `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
 | `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
@@ -525,7 +537,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 219 个用例（core 213 + web 6）
+mvn -o test              # 245 个用例（core 239 + web 6）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

@@ -28,6 +28,9 @@ public enum OperatorType {
     /** HTTP 接口源（REST / JSON API）。 */
     HTTP_SOURCE("http.source", Kind.SOURCE),
 
+    /** 资料磨坊源（z-mill 全格式文档 / 网页 → 分块行或整件成品行）。 */
+    MILL_SOURCE("mill.source", Kind.SOURCE),
+
     /** 内联常量源（声明里写死的行）。 */
     INLINE_SOURCE("inline.source", Kind.SOURCE),
 
@@ -48,6 +51,9 @@ public enum OperatorType {
 
     /** 自由脚本（z-script 沙箱；可产出一列或整行）。 */
     SCRIPT("script", Kind.TRANSFORM),
+
+    /** 平台脚本（调 z-script 脚本中心已上线脚本，app + AK，带版本与审计）。 */
+    SCRIPT_REMOTE("script.remote", Kind.TRANSFORM),
 
     /** 异步映射（每行异步外呼 HTTP 补列；容量背压 + 有序/乱序产出；Flink AsyncFunction 口径）。 */
     ASYNC_MAP("async.map", Kind.TRANSFORM),
@@ -78,6 +84,36 @@ public enum OperatorType {
 
     /** 列转行（melt：声明列逐列竖排成 名字列+值列，其余列原样保留；explode 的横向互补）。 */
     UNPIVOT("unpivot", Kind.TRANSFORM),
+
+    /** 正则提取（捕获组落列；不匹配可给 null 或丢行）。 */
+    REGEX_EXTRACT("regex.extract", Kind.TRANSFORM),
+
+    /** 分列（按分隔符切进声明的输出列名）。 */
+    SPLIT("split", Kind.TRANSFORM),
+
+    /** 模板合成（${列名} 占位符拼串落声明列）。 */
+    TEMPLATE("template", Kind.TRANSFORM),
+
+    /** 列改名（mapping 旧列名 → 新列名）。 */
+    RENAME("rename", Kind.TRANSFORM),
+
+    /** 拍平（嵌套 Map 拍成点路径列）。 */
+    FLATTEN("flatten", Kind.TRANSFORM),
+
+    /** JSON 提取（列内 JSON 文本按点路径取字段落列）。 */
+    JSON_EXTRACT("json.extract", Kind.TRANSFORM),
+
+    /** 哈希（MD5 / SHA 摘要，指纹化 / 匿名化）。 */
+    HASH("hash", Kind.TRANSFORM),
+
+    /** 脱敏（phone / email / half / full 四种打码规则）。 */
+    MASK("mask", Kind.TRANSFORM),
+
+    /** 时间格式化（epoch / ISO / 自定义格式 → 目标格式）。 */
+    DATE_FORMAT("date.format", Kind.TRANSFORM),
+
+    /** 排序（物化整流；只适合有界数据）。 */
+    SORT("sort", Kind.TRANSFORM),
 
     /** 键控聚合（无窗口，滚动累计值，键变化即发一次）。 */
     AGGREGATE("aggregate", Kind.STATEFUL),
@@ -202,7 +238,7 @@ public enum OperatorType {
         if ("unnest".equals(normalized) || "flat.map".equals(normalized)) {
             return EXPLODE;
         }
-        if ("sort".equals(normalized) || "rank".equals(normalized) || "top.n".equals(normalized)) {
+        if ("rank".equals(normalized) || "top.n".equals(normalized)) {
             return TOPN;
         }
         if ("sampling".equals(normalized) || "mod.monitor".equals(normalized)) {

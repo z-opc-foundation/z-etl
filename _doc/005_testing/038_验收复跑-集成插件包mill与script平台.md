@@ -58,6 +58,18 @@ mvn -o test   # 全量 245（core 239 + web 6）全绿
 
 桩：`MillSourceTest` / `ScriptRemoteOperatorTest` 内嵌 `com.sun.net.httpserver` 按 z-mill-web / z-script 平台真实契约回包（multipart 上传体也验证到了字节）。
 
+## 链路实测（2026-11-25 真服务全链）
+
+本地栈：z-mill-web :8891（早先已起）+ z-script-admin :8086（本笔拉起，`Z_BASE_DB_SCRIPT_DATABASE=oc`，脚本表与 etl_* 同库）+ z-etl-web :8092（新 core 重启）。
+
+引导链：`POST /script/api/script/api-key`（唯一免鉴权引导端点）建 app+AK → `POST /script/api/script` 建脚本 `etl-doc-summaries`（GROOVY，返回 Map 供 mode=row）→ ad-hoc `run` 验证平台执行绿。
+
+管道一（网页分支）：`mill.source(url=http://127.0.0.1:8888/, mode=doc)` → `script.remote(mode=row)` → `file.json.sink` → 读 1 写 1，clean 节点 92ms 平台往返，`/tmp/zetl-chain-out/result.json` 落地。
+
+管道二（文件分支 + 插件入链）：`mill.source(file=产品手册.html, mode=chunk)` multipart 上传 → `script.remote(mode=row)` → `mask(preview: half)` → `file.json.sink` → 读 4 写 4，四块带标题路径（`产品手册 / 第一章 安装` 等），脱敏在链上生效。运行履历 `/runs`、计划解释 `/plan` 均正常。
+
+注意：外网 URL（example.com）抓取有超时抖动（z-mill 侧 15s 闸），链路验证用本地页面保证确定性。
+
 ## 边界（D5-BOUNDARY）
 
 本笔不动：`_verify`、`_chain`、其他仓；只改 z-etl 本仓（core 算子 + README + 本 doc）。

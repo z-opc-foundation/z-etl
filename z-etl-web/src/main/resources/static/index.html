@@ -306,7 +306,12 @@ function renderRunResult(r) {
 }
 /* ---------- 左侧树菜单 + hash 路由 ---------- */
 const TABS = ['sources', 'sinks', 'templates', 'sched', 'job'];
+/* hash 别名：主壳菜单路由用复数（/etl/schedules、/etl/jobs ⇒ iframe #schedules/#jobs），
+   控制台 tab id 是单数（tab-sched/tab-job）⇒ 入站 hash 统一归一到内部键。 */
+const TAB_ALIAS = { schedules: 'sched', jobs: 'job' };
+function normTab(t) { return TAB_ALIAS[t] || t; }
 function setTab(tab, skipHash) {
+  tab = normTab(tab);
   document.querySelectorAll('.tgroup').forEach(g => g.classList.toggle('on', g.dataset.tab === tab));
   TABS.forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
   if (!skipHash) history.replaceState(null, '', '#' + tab);
@@ -321,7 +326,7 @@ function toggleGroup(ev, arrow) {
   arrow.closest('.tgroup').classList.toggle('open');
 }
 window.addEventListener('hashchange', () => {
-  const t = location.hash.replace('#', '');
+  const t = normTab(location.hash.replace('#', ''));
   if (TABS.indexOf(t) >= 0) setTab(t, true);
 });
 
@@ -1097,7 +1102,7 @@ function edMouseHandlers() {
   $('envinfo').textContent = '本机 ' + location.host + ' · 同源 API';
   $('spec').value = DEMO_TEXT;
   edMouseHandlers();
-  const t = location.hash.replace('#', '');
+  const t = normTab(location.hash.replace('#', ''));
   setTab(TABS.indexOf(t) >= 0 ? t : 'templates', true);
   ensureOperators().catch(() => {});
 })();

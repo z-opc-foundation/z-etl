@@ -68,4 +68,23 @@
         </dependency>
 </dependencies>
 
+    <!-- 管控面独立部署（k3s / 本地 aio）需要 fat jar：
+         z-boot-parent 只在 pluginManagement 给版本，repackage 必须模块自己声明
+         才有 BOOT-INF 结构（z-etl-web 2026-11-26 首次容器化时补）。 -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

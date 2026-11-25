@@ -1,0 +1,97 @@
+# z-etl-web 管控面部署（2026-11-26 首次上集群）
+#
+# 归属：namespace z-opc（与主壳 z-opc-main 同 ns ⇒ Traefik IngressRoute 同 ns 直引 svc，
+#       不碰 crossNamespace CRD 开关）。
+#
+# 镜像供给（离线纪律，照 z-oss/z-mq 同款）：
+#   · imagePullPolicy: Never ⇒ 节点本地 containerd 必须已有镜像（人工 import，不联网拉）；
+#   · 仓库里 image 写占位 :local，apply 前 sed 成日期-源sha：
+#       sed 's#zopc/z-etl-web:local#zopc/z-etl-web:20261126-<sha>#' z-etl-web.yaml | kubectl apply -f -
+#   灌镜像（pod 落点的每台节点都要一份）：
+#       docker save zopc/z-etl-web:<tag> | ssh <node> "sudo ctr -a /run/k3s/containerd/containerd.sock -n k8s.io images import -"
+#
+# 数据面：阿里云 RDS oc（z.base.db.etl.*，secretRef aliyun-db），
+#         引擎 8 张 etl_* 表由 EtlSchema 启动幂等自建（无需 DBA 手工灌）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: z-etl-web
+  namespace: z-opc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: z-etl-web
+  template:
+    metadata:
+      labels:
+        app: z-etl-web
+    spec:
+      containers:
+        - name: z-etl-web
+          image: zopc/z-etl-web:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8092
+          env:
+            - name: TZ
+              value: Asia/Shanghai
+            - name: LANG
+              value: C.UTF-8
+            - name: LC_ALL
+              value: C.UTF-8
+            - name: ZETL_SERVER_PORT
+              value: "8092"
+            # z-ext 控制台登记（埋点，失败不影响启动）；走集群内 svc 名可免外网绕行
+            - name: ZEXT_CONSOLE_URL
+              value: "http://z-opc-main.z-opc.svc.cluster.local:8888"
+            - name: ZETL_DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aliyun-db
+                  key: db-host
+            - name: ZETL_DB_PORT
+              value: "3306"
+            - name: ZETL_DB_NAME
+              value: "oc"
+            - name: ZETL_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: aliyun-db
+                  key: db-username
+            - name: ZETL_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aliyun-db
+                  key: db-password
+          readinessProbe:
+            tcpSocket:
+              port: 8092
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 8092
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: z-etl-web
+  namespace: z-opc
+spec:
+  selector:
+    app: z-etl-web
+  ports:
+    - port: 8092
+      targetPort: 8092

@@ -18,20 +18,33 @@
   nav{display:flex;gap:4px;margin-left:24px}
   nav button{background:none;border:1px solid transparent;color:var(--dim);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
   nav button.on{color:var(--fg);background:var(--panel2);border-color:var(--line)}
-  main{display:flex;gap:14px;padding:14px 18px;align-items:flex-start}
-  .col-left{width:380px;flex-shrink:0}
-  .col-right{flex:1;min-width:0}
+  main{padding:14px 18px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px}
   .panel h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.05em}
+  details.reg{border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:14px}
+  details.reg summary{list-style:none;cursor:pointer;padding:8px 14px;min-height:32px;display:flex;align-items:center;color:var(--dim);font-size:13px;font-weight:600;letter-spacing:.05em}
+  details.reg summary::-webkit-details-marker{display:none}
+  details.reg summary:hover{color:var(--fg)}
+  details.reg[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  details.reg .reg-body{padding:0 14px 14px}
+  ul.chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+  ul.chips li{padding:0 14px;min-height:32px;display:flex;align-items:center;border:1px solid var(--line);border-radius:16px;cursor:pointer;font-size:13px}
+  ul.chips li:hover{border-color:var(--acc);color:var(--acc)}
+  ul.chips li.on{background:#1d3a5c;border-color:#2d5d94;color:var(--fg)}
+  #dag-wrap{overflow:auto;border-radius:8px}
+  .zoombar{display:flex;align-items:center;gap:6px;margin:8px 0}
+  .zoombar span{color:var(--dim);font-size:12px}
+  .zoombar button{min-width:32px;min-height:28px}
+  .zoombar button.on{background:#1d3a5c;border-color:#2d5d94}
+  .dag-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+  .empty{color:var(--dim);padding:28px 0;text-align:center;font-size:13px}
+  .dag-node{cursor:pointer}
+  .dag-node:hover rect{filter:brightness(1.25)}
   textarea{width:100%;min-height:180px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical}
   input[type=text]{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px}
-  button.act{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+  button.act{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:0 14px;min-height:32px;border-radius:6px;cursor:pointer;font-size:13px}
   button.act:hover{border-color:var(--acc);color:var(--acc)}
   button.act.primary{background:#1d3a5c;border-color:#2d5d94}
-  ul.list{list-style:none;margin:0;padding:0;max-height:260px;overflow:auto}
-  ul.list li{padding:6px 10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;font-size:13px}
-  ul.list li:hover{background:var(--panel2)}
-  ul.list li.on{background:#1d3a5c}
   .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   table{border-collapse:collapse;width:100%;font-size:12px}
   th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
@@ -59,21 +72,21 @@
 
 <main>
   <!-- ============ 流水线 ============ -->
-  <section id="tab-pipe" class="col-left">
-    <div class="panel">
-      <h2>登记流水线（yml / JSON 原文）</h2>
-      <textarea id="spec" spellcheck="false"></textarea>
-      <div class="row" style="margin-top:10px">
-        <button class="act primary" onclick="registerSpec()">登记</button>
-        <button class="act" onclick="loadDemo()">示例</button>
+  <section id="tab-pipe">
+    <details class="reg">
+      <summary>登记流水线（yml / JSON 原文）</summary>
+      <div class="reg-body">
+        <textarea id="spec" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="act primary" onclick="registerSpec()">登记</button>
+          <button class="act" onclick="loadDemo()">示例</button>
+        </div>
       </div>
-    </div>
+    </details>
     <div class="panel">
       <h2>流水线列表</h2>
-      <ul class="list" id="plist"></ul>
+      <ul class="chips" id="plist"></ul>
     </div>
-  </section>
-  <section id="tab-pipe-r" class="col-right">
     <div class="panel" id="pdetail">
       <h2>流水线详情 <span class="badge" id="pd-name">未选择</span></h2>
       <div class="row">
@@ -91,12 +104,12 @@
         <input type="text" id="run-params" placeholder='运行参数 JSON，如 {"bizdate":"2026-11-21"}（可空）' style="flex:1;min-width:220px"/>
       </div>
       <div id="pd-extra" class="hidden"></div>
-      <div id="pd-body"></div>
+      <div id="pd-body"><p class="empty">尚未选择流水线——在上方列表点选一条后，这里呈现拓扑 DAG、运行结果与节点指标。</p></div>
     </div>
   </section>
 
   <!-- ============ 调度 ============ -->
-  <section id="tab-sched" class="col-right hidden" style="flex:1">
+  <section id="tab-sched" class="hidden">
     <div class="panel">
       <h2>全部调度登记</h2>
       <div id="sched-body">加载中…</div>
@@ -104,20 +117,20 @@
   </section>
 
   <!-- ============ 作业 ============ -->
-  <section id="tab-job" class="col-left hidden">
-    <div class="panel">
-      <h2>登记作业（yml / JSON 原文）</h2>
-      <textarea id="jobdesc" spellcheck="false"></textarea>
-      <div class="row" style="margin-top:10px">
-        <button class="act primary" onclick="registerJob()">登记</button>
+  <section id="tab-job" class="hidden">
+    <details class="reg">
+      <summary>登记作业（yml / JSON 原文）</summary>
+      <div class="reg-body">
+        <textarea id="jobdesc" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="act primary" onclick="registerJob()">登记</button>
+        </div>
       </div>
-    </div>
+    </details>
     <div class="panel">
       <h2>作业列表</h2>
-      <ul class="list" id="jlist"></ul>
+      <ul class="chips" id="jlist"></ul>
     </div>
-  </section>
-  <section id="tab-job-r" class="col-right hidden">
     <div class="panel">
       <h2>作业详情 <span class="badge" id="jd-name">未选择</span></h2>
       <div class="row">
@@ -126,7 +139,7 @@
         <button class="act" onclick="showJobRuns()">运行履历</button>
         <button class="act" onclick="showJobWatermark()">水位</button>
       </div>
-      <div id="jd-body"></div>
+      <div id="jd-body"><p class="empty">尚未选择作业——在上方列表点选一个后，这里呈现运行结果与履历。</p></div>
     </div>
   </section>
 </main>
@@ -167,6 +180,12 @@ async function api(method, path, body, raw) {
 
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function jsonBlock(v) { return '<pre>' + esc(typeof v === 'string' ? v : JSON.stringify(v, null, 2)) + '</pre>'; }
+function fmtTime(ts) {
+  if (ts == null || ts === '') return '—';
+  const d = new Date(ts);
+  const p = n => (n < 10 ? '0' : '') + n;
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
 
 function kvTable(obj) {
   const rows = Object.keys(obj || {}).map(k => '<tr><th>' + esc(k) + '</th><td>' + esc(
@@ -199,11 +218,7 @@ function renderRunResult(r) {
 /* ---------- 标签页 ---------- */
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['pipe', 'sched', 'job'].forEach(t => {
-    $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab);
-    const r = $('tab-' + t + '-r');
-    if (r) r.classList.toggle('hidden', t !== b.dataset.tab);
-  });
+  ['pipe', 'sched', 'job'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'sched') loadSchedules();
   if (b.dataset.tab === 'job') refreshJobs().catch(e => toast('作业列表加载失败：' + e.message, false));
 });
@@ -258,7 +273,7 @@ async function registerSpec() {
   } catch (e) { toast(e.message, false); }
 }
 
-function needPipeline() { if (!pipeline) { toast('先在左侧选一条流水线', false); return false; } return true; }
+function needPipeline() { if (!pipeline) { toast('先在上方列表选一条流水线', false); return false; } return true; }
 function setBody(html) { $('pd-body').innerHTML = html; $('pd-extra').className = 'hidden'; }
 function extraPanel(html) { const x = $('pd-extra'); x.innerHTML = html; x.className = ''; }
 
@@ -285,8 +300,44 @@ async function fetchSpec() {
   return lastSpec;
 }
 
+let dagZoom = 'fit';       // 'fit'（适应容器，不小于自然尺寸）或数字倍率
+let selectedNode = null;   // 点选查看指标的节点 id
+
+const ZOOMS = [['fit', '适应'], ['1', '1:1'], ['1.5', '150%'], ['2', '200%']];
+
+function renderDag() {
+  if (!lastSpec) return;
+  const zoomBtns = '<div class="zoombar"><span>缩放</span>'
+    + ZOOMS.map(z => '<button class="act' + (String(dagZoom) === z[0] ? ' on' : '') + '" onclick="setDagZoom(\'' + z[0] + '\')">' + z[1] + '</button>').join('')
+    + '</div>';
+  const nodeKeys = lastSpec.nodes ? lastSpec.nodes.map(n => n.id) : [];
+  const sel = selectedNode && nodeKeys.indexOf(selectedNode) >= 0 ? selectedNode : null;
+  const detail = sel
+    ? '<h3 class="sec">节点指标 · ' + esc(sel) + '</h3>'
+      + (lastMetrics && lastMetrics[sel]
+        ? kvTable(lastMetrics[sel])
+        : '<p class="empty">该节点暂无运行指标——运行 / 试跑后自动叠加。</p>')
+    : '';
+  $('dag-area').innerHTML = zoomBtns + '<div id="dag-wrap">' + dagSvg(lastSpec, lastMetrics) + '</div>'
+    + '<div class="dag-legend">'
+    + Object.keys(KIND_STYLE).map(k => '<span class="badge" style="border-color:' + KIND_STYLE[k].stroke + '">' + KIND_STYLE[k].tag + '</span>').join('')
+    + '<span class="badge" style="border-color:var(--warn)">行数变化</span></div>'
+    + '<p style="font-size:11px;color:var(--dim)">边框色 = 算子类别（绿 源 / 灰 变换 / 蓝 有状态 / 橙 汇）；琥珀色节点 = 进出不等（行数被改写）；点击节点在下方看全量计数，运行 / 试跑后自动叠加最新指标。</p>'
+    + detail;
+  $('dag-area').querySelector('#dag-wrap').onclick = ev => {
+    const g = ev.target.closest ? ev.target.closest('[data-node]') : null;
+    if (!g) return;
+    selectedNode = g.getAttribute('data-node') === selectedNode ? null : g.getAttribute('data-node');
+    renderDag();
+  };
+}
+
+function setDagZoom(z) { dagZoom = z === 'fit' ? 'fit' : Number(z); renderDag(); }
+
 async function showDag() {
   if (!needPipeline()) return;
+  selectedNode = null;
+  setBody('<h3 class="sec">拓扑</h3><p class="empty">拓扑加载中…</p>');
   try {
     const spec = await fetchSpec();
     if (!lastMetrics) {
@@ -295,12 +346,12 @@ async function showDag() {
         if (h.runs && h.runs.length) lastMetrics = h.runs[0].nodeMetrics || null;
       } catch (e2) { /* 无履历就空着画 */ }
     }
-    setBody('<h3 class="sec">拓扑</h3><div id="dag-wrap">' + dagSvg(spec, lastMetrics) + '</div>'
-      + '<p style="font-size:11px;color:var(--dim)">边框色 = 算子类别（绿 源 / 灰 变换 / 蓝 有状态 / 橙 汇）；琥珀色节点 = 进出不等（行数被改写）；悬停看节点计数。运行 / 试跑后自动叠加最新指标。</p>'
-      + '<div style="display:flex;gap:14px;flex-wrap:wrap">'
-      + Object.keys(KIND_STYLE).map(k => '<span class="badge" style="border-color:' + KIND_STYLE[k].stroke + '">' + KIND_STYLE[k].tag + '</span>').join('')
-      + '<span class="badge" style="border-color:var(--warn)">行数变化</span></div>');
-  } catch (e) { toast(e.message, false); }
+    setBody('<h3 class="sec">拓扑</h3><div id="dag-area"></div>');
+    renderDag();
+  } catch (e) {
+    setBody('<h3 class="sec">拓扑</h3><p style="color:var(--err)">拓扑加载失败：' + esc(e.message) + '</p>');
+    toast(e.message, false);
+  }
 }
 
 /** 最长路径分层 + 层内居中，返回 SVG 字符串。metrics 可为 null。 */
@@ -325,7 +376,7 @@ function dagSvg(spec, metrics) {
   });
   while (columns.length && !columns[columns.length - 1]) columns.pop();
 
-  const NODE_W = 172, NODE_H = 54, GAP_X = 96, GAP_Y = 30, M = 16;
+  const NODE_W = 240, NODE_H = 76, GAP_X = 120, GAP_Y = 44, M = 20;
   const maxRows = Math.max.apply(null, columns.map(c => c.length));
   const W = M * 2 + columns.length * NODE_W + (columns.length - 1) * GAP_X;
   const H = M * 2 + maxRows * NODE_H + (maxRows - 1) * GAP_Y;
@@ -338,7 +389,10 @@ function dagSvg(spec, metrics) {
     });
   });
 
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;background:var(--bg);border:1px solid var(--line);border-radius:8px">'
+  const style = dagZoom === 'fit'
+    ? 'width:100%;min-width:720px'
+    : 'width:' + Math.round(W * dagZoom) + 'px';
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="' + style + ';background:var(--bg);border:1px solid var(--line);border-radius:8px;display:block">'
     + '<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
     + '<path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6a7a"/></marker></defs>';
 
@@ -346,9 +400,9 @@ function dagSvg(spec, metrics) {
     const a = pos[e.from], b = pos[e.to];
     if (!a || !b) return;
     const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
-    const dx = Math.max(36, (x2 - x1) / 2);
+    const dx = Math.max(48, (x2 - x1) / 2);
     svg += '<path d="M ' + x1 + ' ' + y1 + ' C ' + (x1 + dx) + ' ' + y1 + ', ' + (x2 - dx) + ' ' + y2 + ', ' + x2 + ' ' + y2
-      + '" fill="none" stroke="#5a6a7a" stroke-width="1.4" marker-end="url(#arw)"/>';
+      + '" fill="none" stroke="#5a6a7a" stroke-width="2" marker-end="url(#arw)"/>';
   });
 
   nodes.forEach(n => {
@@ -357,17 +411,18 @@ function dagSvg(spec, metrics) {
     const st = KIND_STYLE[kind];
     const m = metrics ? metrics[n.id] : null;
     const dropped = m && m['records-in'] != null && m['records-out'] != null && m['records-out'] < m['records-in'];
+    const on = n.id === selectedNode;
     const stroke = dropped ? 'var(--warn)' : st.stroke;
     const badge = m
-      ? '<text x="' + (p.x + NODE_W - 6) + '" y="' + (p.y + NODE_H - 7) + '" text-anchor="end" font-size="10" fill="#8a97a5">'
+      ? '<text x="' + (p.x + NODE_W - 8) + '" y="' + (p.y + NODE_H - 9) + '" text-anchor="end" font-size="12" fill="#8a97a5">'
         + esc('in ' + (m['records-in'] == null ? '—' : m['records-in']) + ' · out ' + (m['records-out'] == null ? '—' : m['records-out'])) + '</text>'
       : '';
     const tip = m ? Object.keys(m).map(k => esc(k) + '=' + esc(m[k])).join('\n') : '尚无运行指标';
-    svg += '<g title="' + esc(n.id) + '"><title>' + tip + '</title>'
-      + '<rect x="' + p.x + '" y="' + p.y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="9" '
-      + 'fill="var(--panel2)" stroke="' + stroke + '" stroke-width="1.5"/>'
-      + '<text x="' + (p.x + 10) + '" y="' + (p.y + 21) + '" font-size="12.5" font-weight="600" fill="var(--fg)">' + esc(n.id) + '</text>'
-      + '<text x="' + (p.x + 10) + '" y="' + (p.y + 37) + '" font-size="10.5" fill="' + st.stroke + '">' + esc(n.type) + '</text>'
+    svg += '<g class="dag-node" data-node="' + esc(n.id) + '" role="button" aria-label="' + esc(n.id) + ' 节点，查看指标"><title>' + tip + '</title>'
+      + '<rect x="' + p.x + '" y="' + p.y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="10" '
+      + 'fill="' + (on ? '#243447' : 'var(--panel2)') + '" stroke="' + stroke + '" stroke-width="' + (on ? 3 : 2) + '"/>'
+      + '<text x="' + (p.x + 12) + '" y="' + (p.y + 28) + '" font-size="15" font-weight="600" fill="var(--fg)">' + esc(n.id) + '</text>'
+      + '<text x="' + (p.x + 12) + '" y="' + (p.y + 49) + '" font-size="12.5" fill="' + st.stroke + '">' + esc(n.type) + '</text>'
       + badge + '</g>';
   });
   return svg + '</svg>';
@@ -381,7 +436,7 @@ async function showRuns() {
   const runs = data.runs || [];
   setBody('<h3 class="sec">运行履历（最近 ' + runs.length + ' 次）</h3>' + (runs.length
     ? runs.map((r, i) => '<details' + (i === 0 ? ' open' : '') + '><summary style="cursor:pointer;padding:4px 0">'
-      + new Date(r.startedAt).toLocaleString() + ' · ' + esc(r.mode) + ' · 读 ' + r.recordsRead + ' 写 ' + r.recordsWritten + '</summary>'
+      + fmtTime(r.startedAt) + ' · ' + esc(r.mode) + ' · 读 ' + r.recordsRead + ' 写 ' + r.recordsWritten + '</summary>'
       + renderRunResult(r) + '</details>').join('')
     : '<p style="color:var(--dim)">还没有运行记录</p>'));
 }
@@ -430,8 +485,9 @@ async function runPipe(dry) {
     const r = body ? await api('POST', path, body) : await api('POST', path);
     lastMetrics = r.nodeMetrics || null;
     if (lastSpec && lastSpec.name === pipeline) {
-      setBody('<h3 class="sec">拓扑（本轮指标已叠加）</h3><div id="dag-wrap">' + dagSvg(lastSpec, lastMetrics) + '</div>'
+      setBody('<h3 class="sec">拓扑（本轮指标已叠加）</h3><div id="dag-area"></div>'
         + '<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
+      renderDag();
     } else {
       setBody('<h3 class="sec">' + (dry ? '试跑结果（不落地）' : '运行结果') + '</h3>' + renderRunResult(r));
     }
@@ -446,8 +502,8 @@ async function loadSchedules() {
     $('sched-body').innerHTML = list.length
       ? '<table><tr><th>流水线</th><th>cron</th><th>启用</th><th>上次触发</th><th>下次触发</th></tr>'
         + list.map(s => '<tr><td>' + esc(s.pipelineName) + '</td><td><code>' + esc(s.cronExpression) + '</code></td><td>'
-          + (s.enabled ? '是' : '否') + '</td><td>' + (s.lastTriggeredAt ? new Date(s.lastTriggeredAt).toLocaleString() : '—')
-          + '</td><td>' + (s.nextFireTime ? new Date(s.nextFireTime).toLocaleString() : '—') + '</td></tr>').join('') + '</table>'
+          + (s.enabled ? '是' : '否') + '</td><td>' + fmtTime(s.lastTriggeredAt)
+          + '</td><td>' + fmtTime(s.nextFireTime) + '</td></tr>').join('') + '</table>'
       : '<p style="color:var(--dim)">没有调度登记</p>';
   } catch (e) { $('sched-body').innerHTML = '<p style="color:var(--err)">' + esc(e.message) + '</p>'; }
 }
@@ -468,7 +524,7 @@ async function registerJob() {
     await refreshJobs(); showJob();
   } catch (e) { toast(e.message, false); }
 }
-function needJob() { if (!job) { toast('先在左侧选一个作业', false); return false; } return true; }
+function needJob() { if (!job) { toast('先在上方列表选一个作业', false); return false; } return true; }
 async function showJob() { if (!needJob()) return; $('jd-body').innerHTML = '<h3 class="sec">作业描述</h3>' + jsonBlock(await api('GET', '/api/etl/jobs/' + encodeURIComponent(job))); }
 async function runJob() {
   if (!needJob()) return;
@@ -481,7 +537,7 @@ async function showJobRuns() {
   const runs = data.runs || [];
   $('jd-body').innerHTML = '<h3 class="sec">运行履历</h3>' + (runs.length
     ? '<table><tr><th>时间</th><th>模式</th><th>读</th><th>写</th><th>对账</th><th>水位</th></tr>'
-      + runs.map(r => '<tr><td>' + (r.startedAt ? new Date(r.startedAt).toLocaleString() : '—') + '</td><td>' + esc(r.mode || '')
+      + runs.map(r => '<tr><td>' + fmtTime(r.startedAt) + '</td><td>' + esc(r.mode || '')
         + '</td><td>' + r.rowsRead + '</td><td>' + r.rowsWritten + '</td><td>' + (r.reconciled ? '是' : '否')
         + '</td><td>' + esc(r.watermarkAfter || '—') + '</td></tr>').join('') + '</table>'
     : '<p style="color:var(--dim)">还没有运行记录</p>');

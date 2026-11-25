@@ -31,7 +31,7 @@
   ul.tleaves li.none{color:var(--dim);cursor:default}
   main{flex:1;min-width:0;padding:16px 18px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px}
-  .panel h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.05em}
+  .panel h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.05em;display:flex;align-items:center;gap:10px}
   details.reg{border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:14px}
   details.reg summary{list-style:none;cursor:pointer;padding:8px 14px;min-height:32px;display:flex;align-items:center;color:var(--dim);font-size:13px;font-weight:600;letter-spacing:.05em}
   details.reg summary::-webkit-details-marker{display:none}
@@ -66,26 +66,53 @@
   .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
   .hidden{display:none}
   h3.sec{font-size:13px;margin:14px 0 8px;color:var(--acc)}
+  /* ---------- 画布编辑器 ---------- */
+  #ed-canvas{position:relative;flex:1;min-width:0;height:calc(100vh - 250px);min-height:420px;overflow:hidden;border:1px solid #d9d9d9;border-radius:8px;background:#fbfcfe;background-image:radial-gradient(#dde5ee 1px,transparent 1px);background-size:24px 24px;cursor:grab}
+  #ed-canvas.panning{cursor:grabbing}
+  #ed-world{position:absolute;left:0;top:0;transform-origin:0 0}
+  #ed-svg{position:absolute;left:0;top:0;pointer-events:none}
+  #ed-svg path.edge{pointer-events:stroke;cursor:pointer}
+  .ed-shell{display:flex;gap:12px}
+  .ed-palette{width:190px;flex-shrink:0;overflow:auto;max-height:calc(100vh - 250px)}
+  .pal-group{font-size:12px;color:var(--dim);font-weight:600;margin:8px 0 4px}
+  .pal-item{padding:5px 10px;border:1px solid #d9d9d9;border-radius:6px;margin:3px 0;cursor:pointer;font-size:12px;background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pal-item:hover{border-color:var(--acc);color:var(--acc)}
+  .ed-cfg{width:270px;flex-shrink:0;overflow:auto;max-height:calc(100vh - 250px);border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel)}
+  .ed-cfg label{display:block;font-size:12px;color:var(--dim);margin:8px 0 4px}
+  .ed-node{position:absolute;width:210px;background:#fff;border:1px solid #d9d9d9;border-left:4px solid #8c8c8c;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);user-select:none;cursor:move}
+  .ed-node.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(22,119,255,.25)}
+  .ed-node-h{padding:8px 10px 0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ed-node-t{padding:2px 10px 8px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .port{position:absolute;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #8c8c8c;top:26px;cursor:crosshair;z-index:2}
+  .port-in{left:-7px} .port-out{right:-7px}
   @media (max-width:760px){
     .layout{flex-direction:column}
     aside{width:100%;border-right:none;border-bottom:1px solid var(--line)}
     ul.tleaves{display:flex;flex-wrap:wrap;gap:4px}
     .tgroup:not(.open) ul.tleaves{display:none}
+    .ed-shell{flex-direction:column}
+    .ed-palette,.ed-cfg{width:100%;max-height:200px}
   }
 </style>
 </head>
 <body>
 <div class="layout">
 <aside>
-  <div class="brand">z-etl 控制台</div>
+  <div class="brand">z-etl 数据整顿</div>
   <div class="sub" id="envinfo"></div>
   <nav id="menu">
-    <div class="tgroup open" data-tab="pipe">
-      <div class="trow" onclick="setTab('pipe')"><span class="arrow" onclick="toggleGroup(event,this)">▾</span><span>流水线</span></div>
+    <div class="tgroup" data-tab="sources">
+      <div class="trow" onclick="setTab('sources')"><span>数据源</span></div>
+    </div>
+    <div class="tgroup" data-tab="sinks">
+      <div class="trow" onclick="setTab('sinks')"><span>输出源</span></div>
+    </div>
+    <div class="tgroup open" data-tab="templates">
+      <div class="trow" onclick="setTab('templates')"><span class="arrow" onclick="toggleGroup(event,this)">▾</span><span>模板</span></div>
       <ul class="tleaves" id="plist"></ul>
     </div>
     <div class="tgroup" data-tab="sched">
-      <div class="trow" onclick="setTab('sched')"><span class="arrow" style="visibility:hidden">▾</span><span>调度</span></div>
+      <div class="trow" onclick="setTab('sched')"><span>调度</span></div>
     </div>
     <div class="tgroup open" data-tab="job">
       <div class="trow" onclick="setTab('job')"><span class="arrow" onclick="toggleGroup(event,this)">▾</span><span>作业</span></div>
@@ -94,22 +121,43 @@
   </nav>
 </aside>
 <main>
-  <!-- ============ 流水线 ============ -->
-  <section id="tab-pipe">
-    <details class="reg">
-      <summary>登记流水线（yml / JSON 原文）</summary>
-      <div class="reg-body">
-        <textarea id="spec" spellcheck="false"></textarea>
-        <div class="row" style="margin-top:10px">
-          <button class="act primary" onclick="registerSpec()">登记</button>
-          <button class="act" onclick="loadDemo()">示例</button>
+  <!-- ============ 数据源 ============ -->
+  <section id="tab-sources" class="hidden">
+    <div class="panel">
+      <h2>数据源插件目录（源算子，开箱即用）</h2>
+      <div id="src-body">加载中…</div>
+    </div>
+  </section>
+
+  <!-- ============ 输出源 ============ -->
+  <section id="tab-sinks" class="hidden">
+    <div class="panel">
+      <h2>输出源插件目录（汇算子，开箱即用）</h2>
+      <div id="snk-body">加载中…</div>
+    </div>
+  </section>
+
+  <!-- ============ 模板 ============ -->
+  <section id="tab-templates" class="hidden">
+    <div class="panel" id="tpl-list-panel">
+      <h2>流水线模板 <button class="act primary" onclick="openEditor(null)">＋ 新增模板</button></h2>
+      <details class="reg">
+        <summary>直接登记 yml / JSON 原文（高级）</summary>
+        <div class="reg-body">
+          <textarea id="spec" spellcheck="false"></textarea>
+          <div class="row" style="margin-top:10px">
+            <button class="act primary" onclick="registerSpec()">登记</button>
+            <button class="act" onclick="loadDemo()">示例</button>
+          </div>
         </div>
-      </div>
-    </details>
-    <div class="panel" id="pdetail">
-      <h2>流水线详情 <span class="badge" id="pd-name">未选择</span></h2>
+      </details>
+      <div id="tpl-list">加载中…</div>
+    </div>
+    <div class="panel hidden" id="tpl-detail-panel">
+      <h2>模板详情 <span class="badge" id="pd-name">未选择</span> <button class="act" onclick="showTemplateList()">← 返回列表</button></h2>
       <div class="row">
-        <button class="act primary" onclick="showDag()">拓扑图</button>
+        <button class="act primary" onclick="openEditor(pipeline)">画布编辑</button>
+        <button class="act" onclick="showDag()">拓扑图</button>
         <button class="act" onclick="showSpec()">定义</button>
         <button class="act" onclick="showPlan()">计划解释</button>
         <button class="act" onclick="showRuns()">运行履历</button>
@@ -123,7 +171,29 @@
         <input type="text" id="run-params" placeholder='运行参数 JSON，如 {"bizdate":"2026-11-21"}（可空）' style="flex:1;min-width:220px"/>
       </div>
       <div id="pd-extra" class="hidden"></div>
-      <div id="pd-body"><p class="empty">尚未选择流水线——在左侧树点选一条后，这里呈现拓扑 DAG、运行结果与节点指标。</p></div>
+      <div id="pd-body"><p class="empty">尚未选择模板——在左侧树点选一个后，这里呈现拓扑 DAG、运行结果与节点指标。</p></div>
+    </div>
+    <div class="panel hidden" id="tpl-editor-panel">
+      <div class="row" style="align-items:center">
+        <button class="act" onclick="showTemplateList()">← 返回列表</button>
+        <input type="text" id="ed-name" placeholder="模板名（必填，如 ods-user-daily）" style="width:260px;flex:none"/>
+        <button class="act primary" onclick="edSave()">保存模板</button>
+        <button class="act" onclick="edClear()">清空画布</button>
+        <span style="flex:1"></span>
+        <span class="zoombar" style="margin:0">
+          <span>缩放</span>
+          <button class="act" onclick="edZoomStep(0.9)">−</button>
+          <span id="ed-zoom-label" style="min-width:44px;text-align:center">100%</span>
+          <button class="act" onclick="edZoomStep(1.1)">＋</button>
+          <button class="act" onclick="edZoomFit()">复位</button>
+        </span>
+      </div>
+      <p style="font-size:12px;color:var(--dim);margin:4px 0 8px">左侧点算子入画布 · 拖节点摆位 · 从右侧圆点拖到目标节点连线 · 点连线删边 · 点节点在右侧配 config · 滚轮缩放 / 拖空白平移 · Delete 删选中节点</p>
+      <div class="ed-shell">
+        <div class="ed-palette" id="ed-palette"></div>
+        <div id="ed-canvas"><div id="ed-world"></div></div>
+        <div class="ed-cfg" id="ed-cfg"></div>
+      </div>
     </div>
   </section>
 
@@ -177,13 +247,17 @@ function toast(msg, ok) {
   t._h = setTimeout(() => t.style.display = 'none', 4000);
 }
 
+/* 嵌入主壳时页面挂在 /etl/ 前缀下（vite/nginx 剥前缀反代到本服务），
+ * API 调用要带上同一段前缀；独立跑 8092 时路径是 /index.html，前缀为空。 */
+const API_BASE = location.pathname.indexOf('/etl/') === 0 ? '/etl' : '';
+
 async function api(method, path, body, raw) {
   const opt = { method, headers: {} };
   if (body !== undefined && body !== null) {
     if (raw) { opt.headers['Content-Type'] = 'text/plain'; opt.body = body; }
     else { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   }
-  const res = await fetch(path, opt);
+  const res = await fetch(API_BASE + path, opt);
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch (e) { data = text; }
@@ -230,11 +304,15 @@ function renderRunResult(r) {
     + ((r.notes && r.notes.length) ? '<p style="color:var(--warn);font-size:12px">' + r.notes.map(esc).join('；') + '</p>' : '');
   return head + '<h3 class="sec">节点指标</h3>' + table;
 }
-
-/* ---------- 左侧树菜单 ---------- */
-function setTab(tab) {
+/* ---------- 左侧树菜单 + hash 路由 ---------- */
+const TABS = ['sources', 'sinks', 'templates', 'sched', 'job'];
+function setTab(tab, skipHash) {
   document.querySelectorAll('.tgroup').forEach(g => g.classList.toggle('on', g.dataset.tab === tab));
-  ['pipe', 'sched', 'job'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  TABS.forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  if (!skipHash) history.replaceState(null, '', '#' + tab);
+  if (tab === 'sources') renderCatalog('SOURCE', 'src-body');
+  if (tab === 'sinks') renderCatalog('SINK', 'snk-body');
+  if (tab === 'templates') showTemplateList();
   if (tab === 'sched') loadSchedules();
   if (tab === 'job') refreshJobs().catch(e => toast('作业列表加载失败：' + e.message, false));
 }
@@ -242,8 +320,88 @@ function toggleGroup(ev, arrow) {
   ev.stopPropagation();
   arrow.closest('.tgroup').classList.toggle('open');
 }
+window.addEventListener('hashchange', () => {
+  const t = location.hash.replace('#', '');
+  if (TABS.indexOf(t) >= 0) setTab(t, true);
+});
 
-/* ---------- 流水线 ---------- */
+/* ---------- 算子目录（数据源 / 输出源） ---------- */
+let OPERATORS = null;
+async function ensureOperators() {
+  if (OPERATORS) return OPERATORS;
+  const data = await api('GET', '/api/etl/operators');
+  OPERATORS = data.operators || [];
+  return OPERATORS;
+}
+const KIND_TAG = { SOURCE: '源', TRANSFORM: '变换', STATEFUL: '有状态', SINK: '汇' };
+const KIND_COLOR = { SOURCE: '#389e0d', TRANSFORM: '#8c8c8c', STATEFUL: '#1677ff', SINK: '#d46b08' };
+const CONFIG_KEYS = {
+  'jdbc.source': 'table/columns/where/orderBy/pageSize/eventTimeColumn/eventTimeType/maxOutOfOrderness/resume/pushdown/dataSourceRef',
+  'file.csv.source': 'path/delimiter/quote/header/encoding/columns/columnTypes/skipRows/limit/eventTimeColumn',
+  'file.json.source': 'path/format/itemPath/columns/columnTypes/encoding/eventTimeColumn',
+  'file.xlsx.source': 'path/sheet/header/columns/columnTypes',
+  'file.xml.source': 'path/recordPath/encoding/columns/columnTypes/limit',
+  'http.source': 'url/method/headers/body/itemPath/pageParam/pageSize/maxPages/allowedHosts',
+  'mill.source': 'baseUrl/file/url/mode/timeoutMs',
+  'inline.source': 'rows/columnTypes',
+  'script.source': 'script/engine/name/timeoutMs/maxOutputChars',
+  'message.source': 'topic/pollSize',
+  'pipeline.ref': 'name/params/eventTimeColumn',
+  'jdbc.sink': 'dataSourceRef/table/batchSize/writeMode/columns/idempotencyKey',
+  'file.csv.sink': 'path/columns/delimiter/quote/encoding/append',
+  'file.json.sink': 'path/format/columns/encoding/append',
+  'file.xlsx.sink': 'path/sheetName/header/columns',
+  'file.xml.sink': 'path/rootName/recordName/encoding/declaration/columns',
+  'http.sink': 'url/method/headers/format/timeoutMs',
+  'message.sink': 'topic/keyColumn/keyField/format',
+  'console.sink': '（无配置）',
+  'collect.sink': '（无配置）'
+};
+const EXAMPLES = {
+  'jdbc.source': { table: 'demo_src', columns: ['id', 'name', 'amount'], orderBy: 'id', pageSize: 1000, dataSourceRef: 'ds-src' },
+  'file.csv.source': { path: '/data/in.csv', delimiter: ',', header: true },
+  'file.json.source': { path: '/data/in.json', format: 'ndjson' },
+  'file.xlsx.source': { path: '/data/in.xlsx', header: true },
+  'file.xml.source': { path: '/data/in.xml', recordPath: 'row' },
+  'http.source': { url: 'https://api.example.com/list', pageParam: 'page', pageSize: 100, maxPages: 10 },
+  'mill.source': { url: 'https://example.com/doc.html', mode: 'chunk' },
+  'inline.source': { rows: [{ id: 1, user: '甲', amount: 100 }, { id: 2, user: '乙', amount: 200 }] },
+  'script.source': { script: "return [[1,'甲'],[2,'乙']]", engine: 'GROOVY' },
+  'message.source': { topic: 'etl-in', pollSize: 100 },
+  'pipeline.ref': { name: 'another-pipeline' },
+  'jdbc.sink': { table: 'demo_out', batchSize: 500, writeMode: 'upsert', idempotencyKey: ['id'], dataSourceRef: 'ds-dst' },
+  'file.csv.sink': { path: '/data/out.csv' },
+  'file.json.sink': { path: '/data/out.json', format: 'ndjson' },
+  'file.xlsx.sink': { path: '/data/out.xlsx', sheetName: 'result' },
+  'file.xml.sink': { path: '/data/out.xml', rootName: 'rows', recordName: 'row' },
+  'http.sink': { url: 'https://example.com/hook', format: 'json' },
+  'message.sink': { topic: 'etl-out', format: 'json' },
+  'console.sink': {},
+  'collect.sink': {}
+};
+
+async function renderCatalog(kind, elId) {
+  try {
+    const ops = await ensureOperators();
+    const list = ops.filter(o => o.kind === kind);
+    const rows = list.map(o => {
+      const ex = EXAMPLES[o.id] != null ? EXAMPLES[o.id] : null;
+      const detail = '<details><summary style="cursor:pointer">配置键 + 示例</summary>'
+        + '<p style="margin:6px 0 4px;color:var(--dim)"><code>' + esc(CONFIG_KEYS[o.id] || '—') + '</code></p>'
+        + (ex ? jsonBlock(ex) + '<div class="row"><button class="act" onclick="copyExample(\'' + esc(o.id) + '\')">复制示例</button></div>' : '<p style="color:var(--dim)">暂无示例</p>')
+        + '</details>';
+      return '<tr><td><code>' + esc(o.id) + '</code></td><td>' + esc(o.desc || '') + '</td><td>' + detail + '</td></tr>';
+    }).join('');
+    $(elId).innerHTML = '<table><tr><th style="width:170px">类型串</th><th>说明</th><th style="width:420px">配置</th></tr>' + rows + '</table>';
+  } catch (e) { $(elId).innerHTML = '<p style="color:var(--err)">目录加载失败：' + esc(e.message) + '</p>'; }
+}
+function copyExample(id) {
+  const text = JSON.stringify(EXAMPLES[id] || {}, null, 2);
+  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text); toast('已复制 ' + id + ' 示例', true); }
+  else toast('浏览器不支持剪贴板 API，请手动复制', false);
+}
+
+/* ---------- 流水线 / 模板列表 ---------- */
 const DEMO_TEXT = [
   'name: demo-',
   'nodes:',
@@ -280,7 +438,49 @@ async function refreshPipelines() {
   $('plist').innerHTML = names.length
     ? names.map(n => '<li data-n="' + esc(n) + '" title="' + esc(n) + '" class="' + (n === pipeline ? 'on' : '') + '">' + esc(n) + '</li>').join('')
     : '<li class="none">（空）</li>';
-  $('plist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => { pipeline = li.dataset.n; $('pd-name').textContent = pipeline; lastSpec = null; lastMetrics = null; refreshPipelines(); showDag(); });
+  $('plist').querySelectorAll('li[data-n]').forEach(li => li.onclick = () => openTemplateDetail(li.dataset.n));
+  renderTemplateList(names);
+}
+
+function renderTemplateList(names) {
+  $('tpl-list').innerHTML = names.length
+    ? '<table><tr><th>模板名</th><th style="width:330px">操作</th></tr>'
+      + names.map(n => '<tr><td><code>' + esc(n) + '</code></td><td>'
+        + '<button class="act" onclick="openEditor(\'' + esc(n) + '\')">画布编辑</button> '
+        + '<button class="act" onclick="openTemplateDetail(\'' + esc(n) + '\')">详情</button> '
+        + '<button class="act" onclick="quickRun(\'' + esc(n) + '\',false)">运行</button> '
+        + '<button class="act" onclick="quickRun(\'' + esc(n) + '\',true)">试跑</button></td></tr>').join('')
+      + '</table>'
+    : '<p class="empty">还没有模板——点右上「＋ 新增模板」在画布上拖出第一条流水线。</p>';
+}
+
+function showTemplateList() {
+  $('tpl-list-panel').classList.remove('hidden');
+  $('tpl-detail-panel').classList.add('hidden');
+  $('tpl-editor-panel').classList.add('hidden');
+  refreshPipelines().catch(e => toast('模板列表加载失败：' + e.message, false));
+}
+
+function openTemplateDetail(name) {
+  pipeline = name;
+  $('pd-name').textContent = name;
+  lastSpec = null; lastMetrics = null;
+  $('tpl-list-panel').classList.add('hidden');
+  $('tpl-editor-panel').classList.add('hidden');
+  $('tpl-detail-panel').classList.remove('hidden');
+  refreshPipelines().catch(() => {});
+  showDag();
+}
+
+async function quickRun(name, dry) {
+  pipeline = name;
+  $('pd-name').textContent = name;
+  lastSpec = null; lastMetrics = null;
+  $('tpl-list-panel').classList.add('hidden');
+  $('tpl-editor-panel').classList.add('hidden');
+  $('tpl-detail-panel').classList.remove('hidden');
+  $('run-params').value = '';
+  await runPipe(dry);
 }
 
 async function registerSpec() {
@@ -289,11 +489,11 @@ async function registerSpec() {
     toast('已登记：' + data.name, true);
     pipeline = data.name; $('pd-name').textContent = pipeline;
     lastSpec = null; lastMetrics = null;
-    await refreshPipelines(); showDag();
+    await refreshPipelines();
   } catch (e) { toast(e.message, false); }
 }
 
-function needPipeline() { if (!pipeline) { toast('先在左侧树选一条流水线', false); return false; } return true; }
+function needPipeline() { if (!pipeline) { toast('先在左侧树选一个模板', false); return false; } return true; }
 function setBody(html) { $('pd-body').innerHTML = html; $('pd-extra').className = 'hidden'; }
 function extraPanel(html) { const x = $('pd-extra'); x.innerHTML = html; x.className = ''; }
 
@@ -307,8 +507,8 @@ const KIND_STYLE = {
 
 function kindOf(type) {
   const t = String(type || '');
-  if (/source/.test(t)) return 'source';
-  if (/sink/.test(t)) return 'sink';
+  if (/source|pipeline\.ref$/.test(t)) return 'source';
+  if (/sink$/.test(t)) return 'sink';
   if (/^(aggregate|window\.aggregate|dedup|join|interval\.join|dim\.join|cep\.pattern)$/.test(t)) return 'stateful';
   return 'transform';
 }
@@ -320,8 +520,8 @@ async function fetchSpec() {
   return lastSpec;
 }
 
-let dagZoom = 'fit';       // 'fit'（适应容器，不小于自然尺寸）或数字倍率
-let selectedNode = null;   // 点选查看指标的节点 id
+let dagZoom = 'fit';
+let selectedNode = null;
 
 const ZOOMS = [['fit', '适应'], ['1', '1:1'], ['1.5', '150%'], ['2', '200%']];
 
@@ -378,9 +578,6 @@ async function showDag() {
 function dagSvg(spec, metrics) {
   const nodes = spec.nodes || [];
   const edges = (spec.edges || []).filter(e => e && e.from !== e.to);
-  const byId = {};
-  nodes.forEach(n => byId[n.id] = n);
-
   const layer = {};
   nodes.forEach(n => layer[n.id] = 0);
   for (let i = 0; i < nodes.length; i++) {
@@ -449,7 +646,7 @@ function dagSvg(spec, metrics) {
 }
 
 async function showSpec() { if (!needPipeline()) return; lastSpec = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline)); setBody('<h3 class="sec">定义</h3>' + jsonBlock(lastSpec)); }
-async function showPlan() { if (!needPipeline()) return; setBody('<h3 class="sec">计划解释</h3><pre>' + esc(await (await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/plan')).text()) + '</pre>'); }
+async function showPlan() { if (!needPipeline()) return; setBody('<h3 class="sec">计划解释</h3><pre>' + esc(await (await fetch(API_BASE + '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/plan')).text()) + '</pre>'); }
 async function showRuns() {
   if (!needPipeline()) return;
   const data = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/runs?limit=20');
@@ -462,7 +659,7 @@ async function showRuns() {
 }
 async function showWatermark() {
   if (!needPipeline()) return;
-  const res = await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/watermark');
+  const res = await fetch(API_BASE + '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/watermark');
   setBody('<h3 class="sec">水位记录</h3>' + (res.status === 404 ? '<p style="color:var(--dim)">还没有水位（没跑过增量）</p>' : kvTable(await res.json())));
 }
 async function exportSavepoint() {
@@ -476,7 +673,7 @@ async function exportSavepoint() {
 function copySp() { $('sp-json').select(); document.execCommand('copy'); toast('已复制', true); }
 async function showSched() {
   if (!needPipeline()) return;
-  const res = await fetch('/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/schedule');
+  const res = await fetch(API_BASE + '/api/etl/pipelines/' + encodeURIComponent(pipeline) + '/schedule');
   const cur = res.status === 404 ? null : await res.json();
   extraPanel('<h3 class="sec">调度登记</h3>'
     + '<p style="font-size:12px;color:var(--dim)">' + (cur ? '当前：cron <code>' + esc(cur.cronExpression) + '</code>，' + (cur.enabled ? '已启用' : '已停用') : '未登记') + '</p>'
@@ -567,13 +764,342 @@ async function showJobWatermark() {
   const res = await fetch('/api/etl/jobs/' + encodeURIComponent(job) + '/watermark');
   $('jd-body').innerHTML = '<h3 class="sec">水位记录</h3>' + (res.status === 404 ? '<p style="color:var(--dim)">还没有水位</p>' : kvTable(await res.json()));
 }
+/* ---------- 模板画布编辑器（无限画布：拖拽 / 连线 / 平移缩放） ---------- */
+const ED_W = 210, ED_H = 64, ED_SVG_W = 4000, ED_SVG_H = 2400;
+let ed = null;   // {srcName, name, nodes:[{id,type,cfg,x,y}], edges:[{from,to}], sel, zoom, panX, panY, link, drag}
+
+const DEFAULT_CFG = Object.assign({}, EXAMPLES, {
+  filter: { expr: 'amount > 0' },
+  distinct: { columns: ['user'] },
+  aggregate: { keyBy: ['user'], aggregates: [{ fn: 'SUM', column: 'amount', alias: 'total' }] }
+});
+
+function blankEd() {
+  return { srcName: null, name: '', nodes: [], edges: [], sel: null, zoom: 1, panX: 60, panY: 60, link: null, drag: null };
+}
+
+async function openEditor(name) {
+  try { await ensureOperators(); } catch (e) { toast('算子目录加载失败：' + e.message, false); }
+  if (!(ed && ed.srcName === (name || null))) {
+    if (name) {
+      try {
+        const spec = await api('GET', '/api/etl/pipelines/' + encodeURIComponent(name));
+        ed = specToEd(spec);
+      } catch (e) { toast('模板加载失败：' + e.message, false); ed = blankEd(); }
+    } else {
+      ed = blankEd();
+    }
+  }
+  $('tpl-list-panel').classList.add('hidden');
+  $('tpl-detail-panel').classList.add('hidden');
+  $('tpl-editor-panel').classList.remove('hidden');
+  renderEditor();
+}
+
+function specToEd(spec) {
+  const nodes = (spec.nodes || []).map(n => ({ id: n.id, type: n.type, cfg: n.config && typeof n.config === 'object' ? n.config : {}, x: 0, y: 0 }));
+  const edges = (spec.edges || []).filter(e => e && e.from !== e.to).map(e => ({ from: e.from, to: e.to }));
+  const layer = {}; nodes.forEach(n => layer[n.id] = 0);
+  for (let i = 0; i < nodes.length; i++) {
+    edges.forEach(e => {
+      if (layer[e.from] != null && layer[e.to] != null && layer[e.to] < layer[e.from] + 1) layer[e.to] = layer[e.from] + 1;
+    });
+  }
+  const cols = [];
+  nodes.forEach(n => { const L = layer[n.id] || 0; (cols[L] = cols[L] || []).push(n); });
+  cols.forEach((col, L) => col.forEach((n, i) => { n.x = 60 + L * (ED_W + 130); n.y = 60 + i * (ED_H + 70); }));
+  return { srcName: spec.name || null, name: spec.name || '', nodes: nodes, edges: edges, sel: null, zoom: 1, panX: 40, panY: 40, link: null, drag: null };
+}
+
+function applyEdTransform() {
+  $('ed-world').style.transform = 'translate(' + ed.panX + 'px,' + ed.panY + 'px) scale(' + ed.zoom + ')';
+}
+
+function edToWorld(ev) {
+  const r = $('ed-canvas').getBoundingClientRect();
+  return { x: (ev.clientX - r.left - ed.panX) / ed.zoom, y: (ev.clientY - r.top - ed.panY) / ed.zoom };
+}
+
+function renderEditor() {
+  if (!ed) return;
+  $('ed-name').value = ed.name;
+  $('ed-zoom-label').textContent = Math.round(ed.zoom * 100) + '%';
+  applyEdTransform();
+  renderPalette();
+  renderEdNodes();
+  renderEdges();
+  renderCfg();
+}
+
+function renderPalette() {
+  if (!OPERATORS) { $('ed-palette').innerHTML = '<p class="empty">算子目录未加载</p>'; return; }
+  let html = '';
+  ['SOURCE', 'TRANSFORM', 'STATEFUL', 'SINK'].forEach(kind => {
+    html += '<div class="pal-group">' + KIND_TAG[kind] + '</div>';
+    OPERATORS.filter(o => o.kind === kind).forEach(o => {
+      html += '<div class="pal-item" title="' + esc(o.desc || '') + '" style="border-left:3px solid ' + KIND_COLOR[kind]
+        + '" onclick="edAdd(\'' + esc(o.id) + '\')">' + esc(o.id) + '</div>';
+    });
+  });
+  $('ed-palette').innerHTML = html;
+}
+
+function renderEdNodes() {
+  let html = '<svg id="ed-svg" width="' + ED_SVG_W + '" height="' + ED_SVG_H + '">'
+    + '<defs><marker id="edarw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+    + '<path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa7b4"/></marker></defs></svg>';
+  ed.nodes.forEach((n, i) => {
+    const kind = kindOf(n.type);
+    const color = KIND_STYLE[kind].stroke;
+    html += '<div class="ed-node' + (ed.sel === i ? ' sel' : '') + '" data-i="' + i
+      + '" style="left:' + n.x + 'px;top:' + n.y + 'px;border-left-color:' + color + '">'
+      + '<div class="ed-node-h">' + esc(n.id) + '</div><div class="ed-node-t">' + esc(n.type) + '</div>'
+      + (kind === 'source' ? '' : '<span class="port port-in" data-i="' + i + '"></span>')
+      + (kind === 'sink' ? '' : '<span class="port port-out" data-i="' + i + '"></span>')
+      + '</div>';
+  });
+  $('ed-world').innerHTML = html;
+}
+
+function edgePathD(a, b) {
+  const x1 = a.x + ED_W, y1 = a.y + ED_H / 2, x2 = b.x, y2 = b.y + ED_H / 2;
+  const dx = Math.max(50, (x2 - x1) / 2);
+  return 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + dx) + ' ' + y1 + ', ' + (x2 - dx) + ' ' + y2 + ', ' + x2 + ' ' + y2;
+}
+
+function renderEdges() {
+  const svg = $('ed-svg');
+  if (!svg || !ed) return;
+  let h = '';
+  ed.edges.forEach((e, i) => {
+    const a = ed.nodes.find(n => n.id === e.from), b = ed.nodes.find(n => n.id === e.to);
+    if (!a || !b) return;
+    h += '<path class="edge" data-i="' + i + '" d="' + edgePathD(a, b) + '" fill="none" stroke="#9aa7b4" stroke-width="2" marker-end="url(#edarw)"/>';
+  });
+  if (ed.link) h += '<path d="' + ed.link.d + '" fill="none" stroke="#1677ff" stroke-width="2" stroke-dasharray="6 4"/>';
+  svg.innerHTML = h;
+  svg.querySelectorAll('path.edge').forEach(p => p.onclick = ev => { ev.stopPropagation(); edDelEdge(Number(p.getAttribute('data-i'))); });
+}
+
+function renderCfg() {
+  const box = $('ed-cfg');
+  if (ed.sel == null || !ed.nodes[ed.sel]) {
+    box.innerHTML = '<p class="empty">点选画布上的节点，在这里配 id 与 config。</p>';
+    return;
+  }
+  const n = ed.nodes[ed.sel];
+  const kindKey = ({ source: 'SOURCE', sink: 'SINK', stateful: 'STATEFUL' })[kindOf(n.type)] || 'TRANSFORM';
+  const op = (OPERATORS || []).find(o => o.id === n.type);
+  box.innerHTML = '<label>节点 id</label><input type="text" id="ed-cfg-id" value="' + esc(n.id) + '"/>'
+    + '<label>算子类型 · ' + KIND_TAG[kindKey] + '</label><p style="font-size:12px;margin:0"><code>' + esc(n.type) + '</code></p>'
+    + (op && op.desc ? '<p style="font-size:11px;color:var(--dim);margin:4px 0 0">' + esc(op.desc) + '</p>' : '')
+    + '<label>config（JSON）</label><textarea id="ed-cfg-json" style="min-height:150px">' + esc(JSON.stringify(n.cfg, null, 2)) + '</textarea>'
+    + '<div class="row" style="margin-top:8px"><button class="act primary" onclick="edApplyCfg()">应用</button>'
+    + '<button class="act" style="color:var(--err);border-color:var(--err)" onclick="edDelNode()">删除节点</button></div>';
+}
+
+async function edAdd(type) {
+  const op = (await ensureOperators()).find(o => o.id === type);
+  if (!op) return toast('未知算子：' + type, false);
+  const base = type.split('.').pop();
+  let id = base, n = 1;
+  while (ed.nodes.some(x => x.id === id)) { n++; id = base + '_' + n; }
+  const r = $('ed-canvas').getBoundingClientRect();
+  const cx = (r.width / 2 - ed.panX) / ed.zoom - ED_W / 2;
+  const cy = (r.height / 2 - ed.panY) / ed.zoom - ED_H / 2;
+  const cols = Math.max(1, Math.floor((r.width - 48) / (ED_W + 48)));
+  const x0 = cx - ((cols - 1) * (ED_W + 48)) / 2;
+  const k = ed.nodes.length;
+  const cfgSrc = DEFAULT_CFG[type] != null ? DEFAULT_CFG[type] : {};
+  ed.nodes.push({ id: id, type: type, cfg: JSON.parse(JSON.stringify(cfgSrc)),
+    x: Math.max(8, Math.round(x0) + (k % cols) * (ED_W + 48)),
+    y: Math.max(8, Math.round(cy) + Math.floor(k / cols) * (ED_H + 44)) });
+  ed.sel = ed.nodes.length - 1;
+  renderEditor();
+}
+
+function edApplyCfg() {
+  const n = ed.nodes[ed.sel];
+  if (!n) return;
+  const newId = $('ed-cfg-id').value.trim();
+  if (!newId) return toast('节点 id 不能为空', false);
+  const dup = ed.nodes.some((x, i) => i !== ed.sel && x.id === newId);
+  if (dup) return toast('节点 id 重复：' + newId, false);
+  let cfg;
+  try { cfg = JSON.parse($('ed-cfg-json').value || '{}'); } catch (e) { return toast('config 不是合法 JSON：' + e.message, false); }
+  if (newId !== n.id) ed.edges.forEach(e => { if (e.from === n.id) e.from = newId; if (e.to === n.id) e.to = newId; });
+  n.id = newId; n.cfg = cfg;
+  toast('节点配置已应用', true);
+  renderEditor();
+}
+
+function edDelNode() {
+  if (ed.sel == null) return;
+  const n = ed.nodes[ed.sel];
+  ed.edges = ed.edges.filter(e => e.from !== n.id && e.to !== n.id);
+  ed.nodes.splice(ed.sel, 1);
+  ed.sel = null;
+  renderEditor();
+}
+
+function edDelEdge(i) {
+  ed.edges.splice(i, 1);
+  renderEdges();
+  toast('已删除连线', true);
+}
+
+function edClear() {
+  const name = $('ed-name').value.trim();
+  ed = blankEd();
+  ed.name = name;
+  renderEditor();
+  toast('画布已清空', true);
+}
+
+async function edSave() {
+  const name = $('ed-name').value.trim();
+  if (!name) return toast('先填模板名', false);
+  if (!ed.nodes.length) return toast('画布上还没有节点——从左侧点算子入画布', false);
+  const ids = ed.nodes.map(n => n.id);
+  for (let i = 0; i < ids.length; i++) {
+    if (ids.indexOf(ids[i]) !== i) return toast('节点 id 重复：' + ids[i], false);
+  }
+  const spec = { name: name, nodes: ed.nodes.map(n => ({ id: n.id, type: n.type, config: n.cfg })), edges: ed.edges };
+  try {
+    await api('POST', '/api/etl/pipelines', JSON.stringify(spec, null, 2), true);
+    toast('模板已保存：' + name, true);
+    ed = null; pipeline = name; lastSpec = null; lastMetrics = null;
+    showTemplateList();
+  } catch (e) { toast('保存失败：' + e.message, false); }
+}
+
+function edZoomStep(k) {
+  if (!ed) return;
+  const r = $('ed-canvas').getBoundingClientRect();
+  const mx = r.width / 2, my = r.height / 2;
+  const z2 = Math.min(2, Math.max(0.3, ed.zoom * k));
+  ed.panX = mx - (mx - ed.panX) * (z2 / ed.zoom);
+  ed.panY = my - (my - ed.panY) * (z2 / ed.zoom);
+  ed.zoom = z2;
+  $('ed-zoom-label').textContent = Math.round(ed.zoom * 100) + '%';
+  applyEdTransform();
+}
+
+function edZoomFit() {
+  if (!ed) return;
+  ed.zoom = 1; ed.panX = 60; ed.panY = 60;
+  $('ed-zoom-label').textContent = '100%';
+  applyEdTransform();
+}
+
+function edMouseHandlers() {
+  $('ed-canvas').addEventListener('mousedown', ev => {
+    if (!ed) return;
+    const portEl = ev.target.closest ? ev.target.closest('.port') : null;
+    const nodeEl = ev.target.closest ? ev.target.closest('.ed-node') : null;
+    if (portEl) {
+      ed.drag = { mode: 'link', i: Number(portEl.getAttribute('data-i')) };
+      ev.preventDefault();
+      return;
+    }
+    if (nodeEl) {
+      const i = Number(nodeEl.getAttribute('data-i'));
+      ed.drag = { mode: 'node', i: i, cx: ev.clientX, cy: ev.clientY, nx0: ed.nodes[i].x, ny0: ed.nodes[i].y, moved: false };
+      ev.preventDefault();
+      return;
+    }
+    ed.drag = { mode: 'pan', cx: ev.clientX, cy: ev.clientY, panX0: ed.panX, panY0: ed.panY, moved: false };
+    $('ed-canvas').classList.add('panning');
+  });
+
+  document.addEventListener('mousemove', ev => {
+    if (!ed || !ed.drag) return;
+    const d = ed.drag;
+    if (d.mode === 'pan') {
+      if (Math.abs(ev.clientX - d.cx) + Math.abs(ev.clientY - d.cy) > 4) d.moved = true;
+      ed.panX = d.panX0 + (ev.clientX - d.cx);
+      ed.panY = d.panY0 + (ev.clientY - d.cy);
+      applyEdTransform();
+    } else if (d.mode === 'node') {
+      if (Math.abs(ev.clientX - d.cx) + Math.abs(ev.clientY - d.cy) > 4) d.moved = true;
+      const n = ed.nodes[d.i];
+      if (!n) return;
+      n.x = Math.max(8, d.nx0 + (ev.clientX - d.cx) / ed.zoom);
+      n.y = Math.max(8, d.ny0 + (ev.clientY - d.cy) / ed.zoom);
+      const el = $('ed-world').querySelector('.ed-node[data-i="' + d.i + '"]');
+      if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+      renderEdges();
+    } else if (d.mode === 'link') {
+      const a = ed.nodes[d.i];
+      if (!a) return;
+      const w = edToWorld(ev);
+      ed.link = { d: 'M ' + (a.x + ED_W) + ' ' + (a.y + ED_H / 2) + ' L ' + w.x + ' ' + w.y };
+      renderEdges();
+    }
+  });
+
+  document.addEventListener('mouseup', ev => {
+    if (!ed || !ed.drag) return;
+    const d = ed.drag;
+    ed.drag = null;
+    $('ed-canvas').classList.remove('panning');
+    if (d.mode === 'pan') {
+      if (!d.moved && ed.sel != null) { ed.sel = null; renderEditor(); }
+    } else if (d.mode === 'node') {
+      ed.sel = d.i;
+      renderEditor();
+    } else if (d.mode === 'link') {
+      const svg = $('ed-svg');
+      const prevVis = svg ? svg.style.visibility : '';
+      if (svg) { svg.style.visibility = 'hidden'; }
+      const t = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (svg) { svg.style.visibility = prevVis; }
+      const target = t && t.closest ? t.closest('.port-in, .ed-node') : null;
+      ed.link = null;
+      if (target) {
+        const j = Number(target.getAttribute('data-i'));
+        if (j !== d.i && ed.nodes[d.i] && ed.nodes[j]) {
+          const from = ed.nodes[d.i], to = ed.nodes[j];
+          if (kindOf(from.type) === 'sink') toast('汇算子不能再往外出线', false);
+          else if (kindOf(to.type) === 'source') toast('源算子不接受入边', false);
+          else if (ed.edges.some(e => e.from === from.id && e.to === to.id)) toast('这条边已存在', false);
+          else ed.edges.push({ from: from.id, to: to.id });
+        }
+      }
+      renderEdges();
+    }
+  });
+
+  $('ed-canvas').addEventListener('wheel', ev => {
+    if (!ed) return;
+    ev.preventDefault();
+    const r = $('ed-canvas').getBoundingClientRect();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    const z2 = Math.min(2, Math.max(0.3, ed.zoom * (ev.deltaY < 0 ? 1.1 : 0.9)));
+    ed.panX = mx - (mx - ed.panX) * (z2 / ed.zoom);
+    ed.panY = my - (my - ed.panY) * (z2 / ed.zoom);
+    ed.zoom = z2;
+    $('ed-zoom-label').textContent = Math.round(ed.zoom * 100) + '%';
+    applyEdTransform();
+  }, { passive: false });
+
+  document.addEventListener('keydown', ev => {
+    if (!ed || $('tpl-editor-panel').classList.contains('hidden')) return;
+    if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    if (ed.sel != null) { ev.preventDefault(); edDelNode(); }
+  });
+}
 
 /* ---------- 启动 ---------- */
 (async function init() {
   $('envinfo').textContent = '本机 ' + location.host + ' · 同源 API';
   $('spec').value = DEMO_TEXT;
-  setTab('pipe');
-  try { await refreshPipelines(); } catch (e) { toast('流水线列表加载失败：' + e.message, false); }
+  edMouseHandlers();
+  const t = location.hash.replace('#', '');
+  setTab(TABS.indexOf(t) >= 0 ? t : 'templates', true);
+  ensureOperators().catch(() => {});
 })();
 </script>
 </body>

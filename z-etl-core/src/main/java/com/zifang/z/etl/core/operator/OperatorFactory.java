@@ -137,6 +137,10 @@ public final class OperatorFactory {
                 return new JoinOperator(node);
             case DIFF:
                 return new DiffOperator(node);
+            case EXCEPT:
+                return new SetOpOperator(node, false);
+            case INTERSECT:
+                return new SetOpOperator(node, true);
             case INTERVAL_JOIN:
                 return new IntervalJoinOperator(node);
             case DIM_JOIN:

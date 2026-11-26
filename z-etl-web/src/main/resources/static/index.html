@@ -382,7 +382,46 @@ const EXAMPLES = {
   'http.sink': { url: 'https://example.com/hook', format: 'json' },
   'message.sink': { topic: 'etl-out', format: 'json' },
   'console.sink': {},
-  'collect.sink': {}
+  'collect.sink': {},
+  'filter': { expression: 'amount > 0', engine: 'EL', rejectedTo: 'dead' },
+  'route': { rules: [{ to: 'vip', expression: 'amount > 10000' }, { to: 'normal', expression: 'amount > 0' }], fallback: 'dead' },
+  'map': { columns: [{ name: 'amount_cny', expression: 'amount * 7.2', engine: 'EL', type: 'BIGDECIMAL' }] },
+  'index': { name: 'row_num', start: 1 },
+  'script': { name: 'channel', engine: 'GROOVY', mode: 'column', script: "payment_method == null ? '' : payment_method.trim().toUpperCase()" },
+  'script.remote': { baseUrl: 'http://z-script:8090', scriptCode: 'clean-channel', mode: 'column', name: 'channel' },
+  'async.map': { url: 'https://api.example.com/user/{user_id}', fields: { city: 'data.city' }, capacity: 50, outputMode: 'ordered' },
+  'field.mapping': { mappings: [{ source: 'id', target: 'order_id', type: 'LONG' }] },
+  'type.normalize': { rules: [{ column: 'amount', type: 'BIGDECIMAL', scale: 2 }] },
+  'assert': { mode: 'reject', rejectedTo: 'dead', expression: 'amount > 0', notNullRate: { user_id: 1.0 } },
+  'union': {},
+  'explode': { column: 'tags', target: 'tag', indexColumn: 'tag_idx' },
+  'topn': { orderBy: 'amount', order: 'desc', limit: 10 },
+  'limit': { limit: 100, offset: 0 },
+  'sample': { rate: 0.1, seed: 42 },
+  'distinct': { columns: ['user'] },
+  'unpivot': { columns: ['q1', 'q2'], nameColumn: 'quarter', valueColumn: 'amount' },
+  'pivot': { keyBy: ['product'], pivot: 'month', value: 'amount', fn: 'SUM' },
+  'regex.extract': { column: 'phone_text', pattern: '(\\d{3})-(\\d{4})', outputs: { 1: 'area', 2: 'local' } },
+  'split': { column: 'full_name', separator: ' ', names: ['first', 'last'] },
+  'template': { template: '${user}-${order_id}', name: 'biz_key' },
+  'rename': { mapping: { user: 'user_name' } },
+  'flatten': { separator: '.' },
+  'json.extract': { column: 'payload', fields: { 'data.city': 'city' }, onError: "'null'" },
+  'hash': { columns: ['phone'], algorithm: 'SHA-256', suffix: '_fp' },
+  'mask': { masks: { phone: 'phone', email: 'email' } },
+  'date.format': { column: 'updated_at', toPattern: 'yyyy-MM-dd HH:mm:ss' },
+  'sort': { columns: ['-amount', 'user'] },
+  'profile': { reportTo: 'profile-report', distinctCap: 10000 },
+  'aggregate': { keyBy: ['user'], aggregates: [{ fn: 'SUM', column: 'amount', alias: 'total' }] },
+  'window.aggregate': { keyBy: ['user'], window: { type: 'tumbling', size: '5m' }, allowedLateness: '1m', aggregates: [{ fn: 'COUNT', column: '*', alias: 'cnt' }] },
+  'dedup': { keyBy: ['order_id'], keep: 'first', ttl: '1h' },
+  'join': { left: 'a', right: 'b', leftKey: 'id', rightKey: 'id', joinType: 'inner' },
+  'interval.join': { left: 'a', right: 'b', leftKey: 'id', rightKey: 'id', within: '10m' },
+  'dim.join': { left: 'main', right: 'dim', leftKey: 'city', rightKey: 'city', select: ['province'], ttl: '1h' },
+  'diff': { left: 'cur', right: 'ref', keys: ['order_id'], opColumn: '__op' },
+  'except': { left: 'a', right: 'b', keys: ['order_id'] },
+  'intersect': { left: 'a', right: 'b', keys: ['order_id'] },
+  'cep.pattern': { keyBy: ['order_id'], steps: [{ name: 'create', expression: "type == 'CREATE'" }, { name: 'pay', expression: "type == 'PAID'" }] }
 };
 
 async function renderCatalog(kind, elId) {
@@ -773,11 +812,7 @@ async function showJobWatermark() {
 const ED_W = 210, ED_H = 64, ED_SVG_W = 4000, ED_SVG_H = 2400;
 let ed = null;   // {srcName, name, nodes:[{id,type,cfg,x,y}], edges:[{from,to}], sel, zoom, panX, panY, link, drag}
 
-const DEFAULT_CFG = Object.assign({}, EXAMPLES, {
-  filter: { expr: 'amount > 0' },
-  distinct: { columns: ['user'] },
-  aggregate: { keyBy: ['user'], aggregates: [{ fn: 'SUM', column: 'amount', alias: 'total' }] }
-});
+const DEFAULT_CFG = Object.assign({}, EXAMPLES);
 
 function blankEd() {
   return { srcName: null, name: '', nodes: [], edges: [], sel: null, zoom: 1, panX: 60, panY: 60, link: null, drag: null };

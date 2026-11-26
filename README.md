@@ -315,9 +315,11 @@ edges:
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间）；`duplicateTo` 把被挤掉的行原样走侧输出（有去处，不只丢计数） | `keyBy/keep/ttl/duplicateTo` |
 | `join` | 有状态 | 两路按键关联（inner/left），右表列冲突加后缀；`leftKey`/`rightKey` 列名允许不同（按位置取值关联） | `left/right/leftKey/rightKey/joinType/rightSuffix` |
 | `diff` | 有状态 | **差异**（快照 diff 口径，物化）：两流按键比对产出变化流——键只在左流 ⇒ `INSERT`（发左行）、两侧值不同 ⇒ `UPDATE`（发左行）、只在右流 ⇒ `DELETE`（发右行）、值同 ⇒ 缺省不发只计数（`unchanged: emit` 带 `SAME` 发出）；值比对**数值归一**（`1.0` ≡ `"1"`）；`compare` 声明比对列（缺省左行全部非键列）；`opColumn` 缺省 `__op`；⚠️ 两侧收齐才比，只适合有界数据 | `left/right/keys/compare/opColumn/unchanged` |
+| `except` | 有状态 | **差集**（SQL EXCEPT 口径，物化）：左流有、右流没有的行原样发出（不打变化标记——与 diff 分工：diff 要方向，except 只要集合关系）；缺省整行指纹比对（值归一），`keys` 声明后按键比 | `left/right/keys` |
+| `intersect` | 有状态 | **交集**（SQL INTERSECT 口径，物化）：两侧都有的行原样发出（发左行首现序）；比对口径同 except | `left/right/keys` |
 | `interval.join` | 有状态 | **区间连接**（Flink IntervalJoin 口径）：两路按「关联键 + 事件时间之差 ≤ within」两两配对，每对只发一次；水位到期清理缓存 | `left/right/leftKey/rightKey/within/joinType/rightSuffix` |
 | `dim.join` | 有状态 | **维表关联**（Flink broadcast-state 口径）：右流即维表（同键替换**热更新**、只进状态不下传），声明 `ttl` 按水位过期陈旧条目，`select` 投影维表列 | `left/right/leftKey/rightKey/select/ttl/joinType` |
-| `cep.pattern` | 有状态 | **模式匹配**（Flink CEP 口径的保守子集）：单流步骤序列 + 次数量词（`times` 缺省 1 / `n` / `n,` / `n,m`）+ 可选步骤（`optional` 0 或 1 次，跳过/吃到两条路径都活）+ 紧邻度（`strict` 声明在下一步上：中间插事件匹配即死，缺省宽松）+ 否定步骤（`notNext`：违禁事件一到匹配即死，不消费事件，拖尾的到流尾封口）+ `until` 终止条件（命中的事件不吃进该步，不销毁匹配）+ `within` 时间窗（水位过期清理）+ 流尾封口（剩余步骤全 optional/notNext 的匹配在 flush 时补产出）；产出行 = 最后事件的行 + 每步 `步骤名.列` 与 `步骤名#`；每键部分匹配上限防爆炸 | `keyBy/within/maxPartials/steps: [{name,expression,times,optional,strict,notNext,until}]` |
+| `cep.pattern` | 有状态 | **模式匹配**（Flink CEP 口径的保守子集）：单流步骤序列 + 次数量词（`times` 缺省 1 / `n` / `n,` / `n,m` / `*`（≡`0,` 任意次）/ `+`（≡`1,` 至少一次）——`*` 的步骤吃与不吃两条路径都活，每个循环长度都是合法匹配）+ 可选步骤（`optional` 0 或 1 次，跳过/吃到两条路径都活）+ 紧邻度（`strict` 声明在下一步上：中间插事件匹配即死，缺省宽松）+ 否定步骤（`notNext`：违禁事件一到匹配即死，不消费事件，拖尾的到流尾封口）+ `until` 终止条件（命中的事件不吃进该步，不销毁匹配）+ `within` 时间窗（水位过期清理）+ 流尾封口（剩余步骤全 optional/notNext/`*` 的匹配在 flush 时补产出）；产出行 = 最后事件的行 + 每步 `步骤名.列` 与 `步骤名#`；每键部分匹配上限防爆炸 | `keyBy/within/maxPartials/steps: [{name,expression,times,optional,strict,notNext,until}]` |
 | `jdbc.sink` | 汇 | 批量 upsert/insert（幂等键） | `table/batchSize/writeMode/columns/idempotencyKey` |
 | `file.csv.sink` | 汇 | 写 CSV 文件（表头 + 列顺序；可追加） | `path/columns/delimiter/quote/encoding/append` |
 | `file.json.sink` | 汇 | 写 JSON 文件（`ndjson` / `json` 数组两种形态） | `path/format/columns/encoding/append` |
@@ -550,7 +552,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 274 个用例（core 261 + web 13）
+mvn -o test              # 280 个用例（core 267 + web 13）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

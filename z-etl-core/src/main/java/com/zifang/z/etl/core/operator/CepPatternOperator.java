@@ -45,7 +45,9 @@ import java.util.Set;
  * <ul>
  *   <li><b>次数量词</b>：{@code times} 缺省 {@code 1}；{@code "n"} 恰好 n 次；
  *       {@code "n,"} 至少 n 次（最后一步未封顶 ⇒ 产出后部分匹配继续活着吃同类事件）；
- *       {@code "n,m"} 闭区间；</li>
+ *       {@code "n,m"} 闭区间；{@code "*"}（≡ {@code "0,"}）任意次 —— 事件不吃进该步时开
+ *       「跳过它（0 次）」的分支继续往下试，吃与不吃两条路径都活（宁多配不少配）；
+ *       {@code "+"}（≡ {@code "1,"}）至少一次；0 次下限只配开放式；</li>
  *   <li><b>可选步骤</b>：{@code optional: true} 的步骤可以整步跳过（0 次）——
  *       事件不吃进该步时开一条「跳过它」的分支继续往下试，原匹配也留着
  *       （后续该步条件命中仍能走「吃到」路径，宁多配不少配）；
@@ -162,7 +164,10 @@ public class CepPatternOperator implements Operator {
         }
     }
 
-    /** 次数量词：缺省 1；"n" / "n," / "n,m"。 */
+    /**
+     * 次数量词：缺省 1；"n" / "n," / "n,m"；{@code "*"}（0..∞）/ {@code "+"}（1..∞）/
+     * {@code "0,"}（= *）。0 次下限只配开放式（{@code n,} 形态）—— 恰好 0 次没有意义。
+     */
     private void parseTimes(StepSpec spec, String times) {
         spec.minTimes = 1;
         spec.maxTimes = 1;
@@ -170,22 +175,33 @@ public class CepPatternOperator implements Operator {
             return;
         }
         String text = times.trim();
+        if ("*".equals(text) || "0,".equals(text)) {
+            spec.minTimes = 0;
+            spec.maxTimes = Integer.MAX_VALUE;
+            return;
+        }
+        if ("+".equals(text)) {
+            spec.minTimes = 1;
+            spec.maxTimes = Integer.MAX_VALUE;
+            return;
+        }
         int comma = text.indexOf(',');
         try {
             if (comma < 0) {
                 spec.minTimes = spec.maxTimes = Integer.parseInt(text);
-                return;
+            } else {
+                spec.minTimes = Integer.parseInt(text.substring(0, comma).trim());
+                String upper = text.substring(comma + 1).trim();
+                spec.maxTimes = upper.isEmpty() ? Integer.MAX_VALUE : Integer.parseInt(upper);
             }
-            spec.minTimes = Integer.parseInt(text.substring(0, comma).trim());
-            String upper = text.substring(comma + 1).trim();
-            spec.maxTimes = upper.isEmpty() ? Integer.MAX_VALUE : Integer.parseInt(upper);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
-                    + " 的步骤 " + spec.name + " 的 times 不合法（缺省 1；n / n, / n,m）: " + times);
+                    + " 的步骤 " + spec.name + " 的 times 不合法（缺省 1；n / n, / n,m / * / +）: " + times);
         }
-        if (spec.minTimes < 1 || spec.maxTimes < spec.minTimes) {
+        if (spec.minTimes < 0 || spec.maxTimes < spec.minTimes
+                || (spec.minTimes == 0 && spec.maxTimes != Integer.MAX_VALUE)) {
             throw new IllegalArgumentException("cep.pattern 节点 " + node.getId()
-                    + " 的步骤 " + spec.name + " 的 times 要 1 ≤ 下限 ≤ 上限: " + times);
+                    + " 的步骤 " + spec.name + " 的 times 不合法（0 次下限只配开放式 * / 0,）: " + times);
         }
     }
 
@@ -280,12 +296,12 @@ public class CepPatternOperator implements Operator {
                 } else {
                     next.add(nextPartial);
                 }
-                // optional 步骤吃到了也开一条「不吃（0 次）」的分支 —— 两条路径都合法
-                if (step.optional && target + 1 < steps.size()) {
+                // optional / 循环量词（*，0 次下限）吃到也开一条「不吃（0 次）」的分支 —— 两条路径都合法
+                if ((step.optional || step.minTimes == 0) && target + 1 < steps.size()) {
                     skipAndFeed(partial, target, record, eventTime, next, output);
                 }
-            } else if (step.optional && target + 1 < steps.size()) {
-                // 下一步是 optional 又不吃这个事件 ⇒ 跳过它，同一事件继续往下试
+            } else if ((step.optional || step.minTimes == 0) && target + 1 < steps.size()) {
+                // 下一步是 optional / * 又不吃这个事件 ⇒ 跳过它，同一事件继续往下试
                 skipAndFeed(partial, target, record, eventTime, next, output);
             }
         }
@@ -379,7 +395,7 @@ public class CepPatternOperator implements Operator {
     public void flush(Output output) {
         boolean anySealable = false;
         for (StepSpec step : steps) {
-            if (step.optional || step.notNext) {
+            if (step.optional || step.notNext || step.minTimes == 0) {
                 anySealable = true;
                 break;
             }
@@ -418,7 +434,7 @@ public class CepPatternOperator implements Operator {
         }
         for (int i = partial.stepIndex + 1; i < steps.size(); i++) {
             StepSpec step = steps.get(i);
-            if (!step.optional && !step.notNext) {
+            if (!step.optional && !step.notNext && step.minTimes != 0) {
                 return false;
             }
         }

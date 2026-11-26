@@ -169,19 +169,20 @@ public final class PipelineValidator {
                 }
             }
             if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
-                        || type == OperatorType.DIM_JOIN || type == OperatorType.DIFF) {
+                        || type == OperatorType.DIM_JOIN || type == OperatorType.DIFF
+                        || type == OperatorType.EXCEPT || type == OperatorType.INTERSECT) {
                 if (in.size() != 2) {
-                    throw new IllegalArgumentException("join/diff 节点 " + node.getId()
+                    throw new IllegalArgumentException("join/diff/setop 节点 " + node.getId()
                             + " 必须正好两条入边，实际 " + in.size());
                 }
                 String left = node.string("left");
                 String right = node.string("right");
                 if (left == null || right == null) {
-                    throw new IllegalArgumentException("join/diff 节点 " + node.getId()
+                    throw new IllegalArgumentException("join/diff/setop 节点 " + node.getId()
                             + " 必须声明 config.left 与 config.right");
                 }
                 if (!index.containsKey(left) || !index.containsKey(right)) {
-                    throw new IllegalArgumentException("join/diff 节点 " + node.getId()
+                    throw new IllegalArgumentException("join/diff/setop 节点 " + node.getId()
                             + " 的 left/right 指向了不存在的节点");
                 }
             }

@@ -72,6 +72,8 @@ public class EtlOperatorController {
         DESC.put("dedup", "键控去重：按键保留首条 / 末条，带存活时间");
         DESC.put("join", "连接：左右两路按键关联");
         DESC.put("diff", "差异：两流按键比对出变化流（INSERT/UPDATE/DELETE，快照 diff 口径）");
+        DESC.put("except", "差集：左有右无的行原样发出（SQL EXCEPT 口径，物化）");
+        DESC.put("intersect", "交集：两侧都有的行原样发出（SQL INTERSECT 口径，物化）");
         DESC.put("interval.join", "区间连接：关联键 + 事件时间区间（Flink IntervalJoin 口径）");
         DESC.put("dim.join", "维表关联：右流即维表，同键替换热更新 + TTL（broadcast-state 口径）");
         DESC.put("cep.pattern", "模式匹配：步骤序列 + 次数量词 + within 时间窗（Flink CEP 保守子集）");

@@ -145,6 +145,12 @@ public enum OperatorType {
     /** 差异（两流按键比对出变化流 INSERT/UPDATE/DELETE；快照 diff 口径，物化）。 */
     DIFF("diff", Kind.STATEFUL),
 
+    /** 差集（左有右无的行原样发出；SQL EXCEPT 口径，物化）。 */
+    EXCEPT("except", Kind.STATEFUL),
+
+    /** 交集（两侧都有的行原样发出；SQL INTERSECT 口径，物化）。 */
+    INTERSECT("intersect", Kind.STATEFUL),
+
     /** 区间连接（左右两路按关联键 + 事件时间区间关联；Flink 的 IntervalJoin 口径）。 */
     INTERVAL_JOIN("interval.join", Kind.STATEFUL),
 
@@ -317,6 +323,13 @@ public enum OperatorType {
                 || "changelog".equals(normalized) || "snapshot.diff".equals(normalized)
                 || "change.capture".equals(normalized)) {
             return DIFF;
+        }
+        if ("difference".equals(normalized) || "minus".equals(normalized)
+                || "left.only".equals(normalized)) {
+            return EXCEPT;
+        }
+        if ("in.both".equals(normalized) || "common".equals(normalized)) {
+            return INTERSECT;
         }
         // 输入类型别名
         if ("csv.source".equals(normalized) || "csv".equals(normalized) || "file.csv".equals(normalized)) {

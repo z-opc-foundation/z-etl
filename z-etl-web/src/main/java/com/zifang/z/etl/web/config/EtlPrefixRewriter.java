@@ -1,28 +1,31 @@
 package com.zifang.z.etl.web.config;
 
 import java.io.IOException;
-
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * /etl 前缀兼容（2026-11-26 集群部署起）。
+ * /etl 前缀兼容：让「集群裸转发（Traefik 不剥前缀）」与「本地 nginx 剥前缀」两种形态
+ * 用同一套 controllers/static。
  *
- * <p>集群 Traefik 对 /etl/** 只做裸转发（生产上 strip middleware 注入不生效，见
- * z-opc 仓 08-etl-route.yaml 注释），控制台与 API 以 /etl 前缀到达本服务；本地 aio
- * 由 nginx 剥前缀后以裸路径到达。本过滤器把 /etl/** 一律 rewrite 成 /** 放行，
- * 两种形态共用同一套 controller 与静态资源，不再依赖外部剥前缀。
+ * <p>两条铁律（2026-11-26 生产 500 事故换来的）：
+ * <ul>
+ *   <li><b>只在 REQUEST 分发时重写</b>——welcome-page 与错误页都靠 forward 机制，
+ *       forward 带着改过的 URI 进 Tomcat 的 {@code ApplicationHttpRequest} 会触发
+ *       属性同步无限递归（StackOverflow → Whitelabel 500）；FORWARD / ERROR 分发一律放行原始请求；</li>
+ *   <li><b>裸前缀 /etl、/etl/ 不 rewrite，改 302 重定向</b>到 /etl/index.html——
+ *       rewrite 成 / 会撞上 welcome-page forward（同上），重定向把事情变成最朴素的 GET。</li>
+ * </ul>
  *
- * <p>客户端侧不受影响：浏览器 pathname 仍是 /etl/...，控制台单文件 JS 按
- * location.pathname 前缀继续带 /etl 发请求，服务端对前缀请求同样 rewrite，闭环成立。
+ * @author zifang
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -31,7 +34,15 @@ public class EtlPrefixRewriter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
+        if (request.getDispatcherType() != DispatcherType.REQUEST) {
+            chain.doFilter(request, response);
+            return;
+        }
         String uri = request.getRequestURI();
+        if ("/etl".equals(uri) || "/etl/".equals(uri)) {
+            response.sendRedirect("/etl/index.html");
+            return;
+        }
         String rewritten = rewrittenUri(uri);
         if (rewritten == null) {
             chain.doFilter(request, response);
@@ -40,39 +51,22 @@ public class EtlPrefixRewriter extends OncePerRequestFilter {
         chain.doFilter(new RewrittenRequest(request, rewritten), response);
     }
 
-    /** 返回改写后的 URI；无需改写时返回 null（/etlx 等近似前缀不误伤）。 */
+    /** /etl/xxx → /xxx；裸 /etl、/etl/（走重定向）与其余路径返回 null 不改写。 */
     static String rewrittenUri(String uri) {
-        if (uri.startsWith("/etl/")) {
+        if (uri != null && uri.startsWith("/etl/") && !"/etl/".equals(uri)) {
             return uri.substring("/etl".length());
-        }
-        if ("/etl".equals(uri) || "/etl/".equals(uri)) {
-            return "/";
         }
         return null;
     }
 
     private static class RewrittenRequest extends HttpServletRequestWrapper {
-
         private final String uri;
-
         RewrittenRequest(HttpServletRequest request, String uri) {
             super(request);
             this.uri = uri;
         }
-
-        @Override
-        public String getRequestURI() {
-            return uri;
-        }
-
-        @Override
-        public String getServletPath() {
-            return uri;
-        }
-
-        @Override
-        public String getPathInfo() {
-            return null;
-        }
+        @Override public String getRequestURI() { return uri; }
+        @Override public String getServletPath() { return uri; }
+        @Override public String getPathInfo() { return null; }
     }
 }

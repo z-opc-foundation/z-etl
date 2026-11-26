@@ -26,10 +26,10 @@ class EtlPrefixRewriterTest {
     }
 
     @Test
-    @DisplayName("根别名 /etl 与 /etl/ → /（控制台首页）")
-    void rootAliasRewrite() {
-        assertEquals("/", EtlPrefixRewriter.rewrittenUri("/etl"));
-        assertEquals("/", EtlPrefixRewriter.rewrittenUri("/etl/"));
+    @DisplayName("根别名 /etl 与 /etl/ 不改写（走 302 重定向到 /etl/index.html）")
+    void rootAliasRedirectsNotRewritten() {
+        assertNull(EtlPrefixRewriter.rewrittenUri("/etl"));
+        assertNull(EtlPrefixRewriter.rewrittenUri("/etl/"));
     }
 
     @Test

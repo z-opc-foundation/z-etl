@@ -55,7 +55,7 @@ public class EtlOperatorController {
         DESC.put("sample", "采样：按比例放行（随机可复现 / 按键哈希）");
         DESC.put("distinct", "全行去重：整行 / 列子集判重，内存指纹 + 上限兜底");
         DESC.put("unpivot", "列转行：melt，声明列竖排成 名字列+值列");
-        DESC.put("pivot", "行转列：keyBy 分组 + 透视列值变列名 + 聚合（物化口径）");
+        DESC.put("pivot", "行转列：keyBy 分组 + 透视列值变列名 + 聚合（物化口径，columnPrefix 给派生列加前缀）");
         DESC.put("regex.extract", "正则提取：捕获组落列，不匹配可 null 或丢行");
         DESC.put("split", "分列：按分隔符切进声明的输出列名");
         DESC.put("template", "模板合成：${列名} 占位符拼串落声明列");

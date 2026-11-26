@@ -146,6 +146,66 @@ class PivotOperatorTest {
     }
 
     @Test
+    @DisplayName("columnPrefix：数字透视值派生列名加前缀（m1/m2 可被 EL 引用）；显式 columns 不受影响")
+    void columnPrefix() throws Exception {
+        PipelineRunResult result = run(""
+                + "name: pivot-prefix\n"
+                + "nodes:\n"
+                + "  - id: src\n"
+                + "    type: inline.source\n"
+                + "    config:\n"
+                + "      rows:\n"
+                + "        - {product: A, month: 1, amount: 100}\n"
+                + "        - {product: A, month: 2, amount: 200}\n"
+                + "        - {product: B, month: 1, amount: 50}\n"
+                + "  - id: wide\n"
+                + "    type: pivot\n"
+                + "    config:\n"
+                + "      keyBy: [product]\n"
+                + "      pivot: month\n"
+                + "      value: amount\n"
+                + "      columnPrefix: m\n"
+                + "  - id: out\n"
+                + "    type: collect.sink\n"
+                + "edges:\n"
+                + "  - {from: src, to: wide}\n"
+                + "  - {from: wide, to: out}\n");
+        List<Map<String, Object>> rows = rowsOf(result);
+        assertEquals(2, rows.size());
+        assertEquals(0, new java.math.BigDecimal("100").compareTo((java.math.BigDecimal) rows.get(0).get("m1")),
+                "派生列名 = 前缀 + 透视值文本");
+        assertEquals(0, new java.math.BigDecimal("200").compareTo((java.math.BigDecimal) rows.get(0).get("m2")));
+        assertEquals(0, new java.math.BigDecimal("50").compareTo((java.math.BigDecimal) rows.get(1).get("m1")));
+        assertNull(rows.get(1).get("m2"));
+
+        PipelineRunResult declared = run(""
+                + "name: pivot-prefix-declared\n"
+                + "nodes:\n"
+                + "  - id: src\n"
+                + "    type: inline.source\n"
+                + "    config:\n"
+                + "      rows:\n"
+                + "        - {k: x, m: 1, v: 7}\n"
+                + "  - id: wide\n"
+                + "    type: pivot\n"
+                + "    config:\n"
+                + "      keyBy: [k]\n"
+                + "      pivot: m\n"
+                + "      value: v\n"
+                + "      columns: [month1]\n"
+                + "      columnPrefix: m\n"
+                + "  - id: out\n"
+                + "    type: collect.sink\n"
+                + "edges:\n"
+                + "  - {from: src, to: wide}\n"
+                + "  - {from: wide, to: out}\n");
+        Map<String, Object> row = rowsOf(declared).get(0);
+        assertNull(row.get("month1"), "显式 columns 原名匹配：透视值 1 与声明 month1 文本不同 ⇒ 不命中");
+        assertEquals(0, new java.math.BigDecimal("7").compareTo((java.math.BigDecimal) row.get("m1")),
+                "未命中的值照常落派生列（前缀 + 透视值文本）");
+    }
+
+    @Test
     @DisplayName("校验：缺 pivot 报错；fn=SUM 缺 value 报错；fn 不在白名单报错")
     void validation() {
         IllegalArgumentException missingPivot = assertThrows(IllegalArgumentException.class, () -> run(""

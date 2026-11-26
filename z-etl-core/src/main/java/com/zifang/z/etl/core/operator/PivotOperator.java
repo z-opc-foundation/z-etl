@@ -27,6 +27,9 @@ import java.util.Map;
  *     value: amount            # 值列（fn=COUNT 时可省）
  *     fn: SUM                  # SUM/COUNT/AVG/MIN/MAX/FIRST/LAST（缺省 SUM）
  *     columns: ["2026-01", "2026-02"]   # 可选：显式列序；缺省按首次出现序
+ *     columnPrefix: m          # 可选：透视值派生列名加前缀（值 1 → 列 m1；
+ *                              #   数字值不带前缀会产出 EL 引用不了的裸数字列名；
+ *                              #   显式 columns 声明不受影响）
  * </pre>
  *
  * <p>口径：
@@ -36,6 +39,7 @@ import java.util.Map;
  *       某组没出现的透视值补 null；</li>
  *   <li>透视值匹配按**文本形态**比对（{@code 1} 与 {@code "1"} 同列）；数值统一走
  *       {@link Accumulator} 的 BigDecimal 语义；</li>
+ *   <li>派生列名可用 {@code columnPrefix} 加前缀（默认不加）；</li>
  *   <li>聚合函数白名单（不含 COLLECT_*：每个透视格收数组太容易撑爆）。</li>
  * </ul>
  *
@@ -54,6 +58,7 @@ public class PivotOperator implements Operator {
     private String value;
     private String fn;
     private List<String> declaredColumns;
+    private String columnPrefix;
     private OperatorContext context;
 
     /** 收齐的原始行（物化口径）。 */
@@ -71,6 +76,7 @@ public class PivotOperator implements Operator {
         value = MapOperator.text(node.string("value"));
         fn = node.string("fn", "SUM").toUpperCase();
         declaredColumns = node.strings("columns");
+        columnPrefix = node.string("columnPrefix", "");
         if (pivot == null) {
             throw new IllegalArgumentException("pivot 节点 " + node.getId() + " 必须声明 config.pivot（值转列名的列）");
         }
@@ -96,8 +102,15 @@ public class PivotOperator implements Operator {
 
     @Override
     public void flush(Output output) {
-        // 列序：显式声明优先；缺省按首次出现序
-        List<String> columns = new ArrayList<String>(declaredColumns);
+        // 列序：显式声明优先；缺省按首次出现序。
+        // 匹配键 = 透视值文本（与显式声明同名即并轨）；输出列名 = 声明原名，
+        // 派生列加 columnPrefix（数字透视值不加前缀会产出 EL 引用不了的裸数字列名）。
+        Map<String, String> keyToName = new LinkedHashMap<String, String>();
+        for (String declared : declaredColumns) {
+            if (!keyToName.containsKey(declared)) {
+                keyToName.put(declared, declared);
+            }
+        }
         // 组 → (透视值文本 → 累加器)；LinkedHashMap 保持组与透视值的首次出现序
         Map<List<String>, Map<String, Accumulator>> groups =
                 new LinkedHashMap<List<String>, Map<String, Accumulator>>();
@@ -115,8 +128,8 @@ public class PivotOperator implements Operator {
                 continue;
             }
             String column = String.valueOf(pivotValue);
-            if (!columns.contains(column)) {
-                columns.add(column);
+            if (!keyToName.containsKey(column)) {
+                keyToName.put(column, columnPrefix + column);
             }
             Accumulator cell = cells.get(column);
             if (cell == null) {
@@ -132,9 +145,9 @@ public class PivotOperator implements Operator {
                 out.put(keyBy.get(i), key.get(i));
             }
             Map<String, Accumulator> cells = entry.getValue();
-            for (String column : columns) {
-                Accumulator cell = cells.get(column);
-                out.put(column, cell == null ? null : cell.result());
+            for (Map.Entry<String, String> column : keyToName.entrySet()) {
+                Accumulator cell = cells.get(column.getKey());
+                out.put(column.getValue(), cell == null ? null : cell.result());
             }
             output.collect(Record.of(out));
             context.count("pivoted-groups");

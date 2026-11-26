@@ -27,7 +27,7 @@ export default function CatalogView({kind, title}) {
         return () => { alive = false }
     }, [kind])
     return (
-        <div className="zetl-panel">
+        <div className="zetl-root zetl-panel">
             <h2>{title}</h2>
             {toastEl}
             {err && <p style={{color: 'var(--zetl-err)'}}>目录加载失败：{err}</p>}

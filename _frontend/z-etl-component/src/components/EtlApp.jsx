@@ -124,7 +124,6 @@ export default function EtlApp({view, defaultView, style}) {
                 selected={pipeline}
                 onSelect={setPipeline}
                 notify={notify}
-                toastEl={toastEl}
                 operators={operators}
                 onCount={(n) => setCounts((c) => ({...c, templates: n}))}
             />
@@ -132,7 +131,6 @@ export default function EtlApp({view, defaultView, style}) {
         sched: (
             <SchedulesView
                 notify={notify}
-                toastEl={toastEl}
                 onCount={(n) => setCounts((c) => ({...c, sched: n}))}
             />
         ),
@@ -141,7 +139,6 @@ export default function EtlApp({view, defaultView, style}) {
                 selected={job}
                 onSelect={setJob}
                 notify={notify}
-                toastEl={toastEl}
                 onCount={(n) => setCounts((c) => ({...c, job: n}))}
             />
         ),

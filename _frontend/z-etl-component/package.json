@@ -1,6 +1,6 @@
 {
   "name": "@yuku123/z-etl-component",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "z-etl 组件包：作业模板 / 作业实例 / 调度 / 算子目录 / 无限画布编辑器（宿主注入 apiBase，z-opc 内重组）",
   "license": "MIT",
   "main": "./dist/index.js",

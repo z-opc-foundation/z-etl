@@ -2,9 +2,13 @@ import {useEffect, useState} from 'react'
 import {apiGet, apiGetMaybe404, apiPost, errMsg} from '../services/api.js'
 import {fmtTime} from '../lib/dag.js'
 import RunResult, {JobRunsTable} from './RunResult.jsx'
+import {useToast} from './useToast.jsx'
 
 /** 作业实例：登记（yml/JSON 原文）+ 详情（描述 / 运行 / 履历 / 水位）。 */
-export default function JobsView({selected, onSelect, notify, toastEl, onCount}) {
+export default function JobsView({selected, onSelect, notify: notifyProp, toastEl: toastProp, onCount}) {
+    const {notify: notifySelf, toastEl: toastSelf} = useToast()
+    const notify = notifyProp || notifySelf
+    const toastEl = toastProp || toastSelf
     const [jobs, setJobs] = useState([])
     const [jobdesc, setJobdesc] = useState('')
     const [body, setBody] = useState(null) // {title, node}
@@ -70,7 +74,7 @@ export default function JobsView({selected, onSelect, notify, toastEl, onCount})
     }
 
     return (
-        <div>
+        <div className="zetl-root">
             <details className="zetl-reg">
                 <summary>登记作业（yml / JSON 原文）</summary>
                 <div className="zetl-reg-body">

@@ -1,8 +1,12 @@
 import {useEffect, useState} from 'react'
 import {apiGet, errMsg} from '../services/api.js'
 import {fmtTime} from '../lib/dag.js'
+import {useToast} from './useToast.jsx'
 
-export default function SchedulesView({notify, toastEl, onCount}) {
+export default function SchedulesView({notify: notifyProp, toastEl: toastProp, onCount}) {
+    const {notify: notifySelf, toastEl: toastSelf} = useToast()
+    const notify = notifyProp || notifySelf
+    const toastEl = toastProp || toastSelf
     const [list, setList] = useState(null)
     const [err, setErr] = useState(null)
     useEffect(() => {
@@ -16,7 +20,7 @@ export default function SchedulesView({notify, toastEl, onCount}) {
         return () => { alive = false }
     }, [])
     return (
-        <div className="zetl-panel">
+        <div className="zetl-root zetl-panel">
             <h2>全部调度登记</h2>
             {toastEl}
             {err && <p style={{color: 'var(--zetl-err)'}}>{err}</p>}

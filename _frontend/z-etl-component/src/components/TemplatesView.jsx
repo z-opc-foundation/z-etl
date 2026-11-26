@@ -61,7 +61,15 @@ function DagView({spec, metrics}) {
  * 作业模板视图：列表 → 详情（拓扑 / 定义 / 计划 / 履历 / 水位 / 保存点 / 调度 / 运行）→ 无限画布编辑器。
  * props: {selected, onSelect, notify, toastEl, operators, onCount}
  */
-export default function TemplatesView({selected, onSelect, notify, toastEl, operators, onCount}) {
+export default function TemplatesView({selected, onSelect, notify: notifyProp, toastEl: toastProp, operators: operatorsProp, onCount}) {
+    const {notify: notifySelf, toastEl: toastSelf} = useToast()
+    const notify = notifyProp || notifySelf
+    const toastEl = toastProp || toastSelf
+    const operators = operatorsProp || null // 缺省自取（组件直挂形态；EtlApp 传入共享缓存）
+    const [ownOperators, setOwnOperators] = useState(null)
+    useEffect(() => {
+        if (!operatorsProp) apiGet('/etl/operators').then((d) => setOwnOperators(d.operators || [])).catch(() => {})
+    }, [])
     const [names, setNames] = useState([])
     const [mode, setMode] = useState('list') // list | detail | editor
     const [spec, setSpec] = useState(null) // 模板声明缓存
@@ -278,6 +286,7 @@ export default function TemplatesView({selected, onSelect, notify, toastEl, oper
     // ── 画布编辑器 ──
     if (mode === 'editor') {
         return (
+            <div className="zetl-root">
             <PipelineCanvas
                 spec={editorSpec || null}
                 operators={operators}
@@ -290,13 +299,14 @@ export default function TemplatesView({selected, onSelect, notify, toastEl, oper
                     setMode('list')
                 }}
             />
+            </div>
         )
     }
 
     // ── 模板详情 ──
     if (mode === 'detail') {
         return (
-            <div className="zetl-panel">
+            <div className="zetl-root zetl-panel">
                 <h2>模板详情 <span className="zetl-badge">{name || '未选择'}</span> <button className="zetl-act" onClick={() => setMode('list')}>← 返回列表</button></h2>
                 {toastEl}
                 <div className="zetl-row">
@@ -333,7 +343,7 @@ export default function TemplatesView({selected, onSelect, notify, toastEl, oper
 
     // ── 模板列表 ──
     return (
-        <div className="zetl-panel">
+        <div className="zetl-root zetl-panel">
             <h2>作业模板 <button className="zetl-act zetl-primary" onClick={() => { setEditorSpec(null); setMode('editor') }}>＋ 新增模板</button></h2>
             {toastEl}
             <details className="zetl-reg">

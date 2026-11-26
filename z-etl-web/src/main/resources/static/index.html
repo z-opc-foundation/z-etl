@@ -131,24 +131,31 @@
     </div>
   </div>
   <nav class="nav" id="menu">
-    <!-- 组：流水线（主对象：登记的管道做可点叶子，点击直达 DAG 详情） -->
-    <div class="nav-group open" data-tab="templates" data-key="pipelines">
+    <!-- 组：作业管理（模板 = 管道定义；实例 = 登记的作业；调度同门） -->
+    <div class="nav-group open" data-tab="templates" data-key="jobs-mgmt">
       <button type="button" class="nav-group-toggle" onclick="toggleGroup(event,this)">
-        <span>流水线</span>
+        <span>作业管理</span>
         <span class="nav-group-active"></span>
-        <span class="nav-badge" id="cnt-templates"></span>
         <span class="nav-group-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
       </button>
       <div class="nav-items">
         <div class="nav-item" data-tab="templates" onclick="setTab('templates')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
-          <span class="nav-text">模板总览</span>
-        </div>
-        <div class="nav-item nav-new" onclick="setTab('templates', true);openEditor(null)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-          <span class="nav-text">新建流水线</span>
+          <span class="nav-text">作业模板</span>
+          <span class="nav-badge" id="cnt-templates"></span>
         </div>
         <ul class="nav-subitems" id="plist"></ul>
+        <div class="nav-item" data-tab="job" onclick="setTab('job')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <span class="nav-text">作业实例</span>
+          <span class="nav-badge" id="cnt-job"></span>
+        </div>
+        <ul class="nav-subitems" id="jlist"></ul>
+        <div class="nav-item" data-tab="sched" onclick="setTab('sched')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="nav-text">调度</span>
+          <span class="nav-badge" id="cnt-sched"></span>
+        </div>
       </div>
     </div>
     <!-- 组：算子库（源 / 汇 目录页；变换与有状态在画布调色盘里） -->
@@ -169,27 +176,6 @@
           <span class="nav-text">汇算子</span>
           <span class="nav-badge" id="cnt-sinks"></span>
         </div>
-      </div>
-    </div>
-    <!-- 组：运行（调度 + 作业；登记的作业做可点叶子） -->
-    <div class="nav-group open" data-tab="job" data-key="runs">
-      <button type="button" class="nav-group-toggle" onclick="toggleGroup(event,this)">
-        <span>运行</span>
-        <span class="nav-group-active"></span>
-        <span class="nav-group-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
-      </button>
-      <div class="nav-items">
-        <div class="nav-item" data-tab="sched" onclick="setTab('sched')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span class="nav-text">调度</span>
-          <span class="nav-badge" id="cnt-sched"></span>
-        </div>
-        <div class="nav-item" data-tab="job" onclick="setTab('job')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span class="nav-text">作业</span>
-          <span class="nav-badge" id="cnt-job"></span>
-        </div>
-        <ul class="nav-subitems" id="jlist"></ul>
       </div>
     </div>
   </nav>
@@ -220,7 +206,7 @@
   <!-- ============ 模板 ============ -->
   <section id="tab-templates" class="hidden">
     <div class="panel" id="tpl-list-panel">
-      <h2>流水线模板 <button class="act primary" onclick="openEditor(null)">＋ 新增模板</button></h2>
+      <h2>作业模板 <button class="act primary" onclick="openEditor(null)">＋ 新增模板</button></h2>
       <details class="reg">
         <summary>直接登记 yml / JSON 原文（高级）</summary>
         <div class="reg-body">

@@ -1,0 +1,19 @@
+{
+  "name": "z-etl-suit",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@yuku123/z-etl-component": "file:../z-etl-component",
+    "axios": "^1.16.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^6.4.5"
+  }
+}

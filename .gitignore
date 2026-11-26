@@ -48,3 +48,8 @@ dist.bak-*/
 /.cache/
 **/__pycache__/
 *.pyc
+
+# Frontend component builds (dist = npm publish artifact, node_modules = deps)
+_frontend/*/dist/
+_frontend/*/node_modules/
+_frontend/*/dist.stale-*/

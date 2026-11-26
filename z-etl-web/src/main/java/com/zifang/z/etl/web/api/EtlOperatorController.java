@@ -41,6 +41,7 @@ public class EtlOperatorController {
         DESC.put("filter", "过滤：表达式为真才放行，未命中可走旁路输出");
         DESC.put("route", "路由：n 路条件分流，rules 顺序判定命中即走旁路，fallback 兜底");
         DESC.put("map", "行级映射：表达式产出新列");
+        DESC.put("index", "行号：每行编一个序号列，可按键各自编号（ROW_NUMBER 无排序版）");
         DESC.put("script", "自由脚本：z-script 沙箱，可产出一列或整行");
         DESC.put("script.remote", "平台脚本：调 z-script 脚本中心已上线脚本（app + AK）");
         DESC.put("async.map", "异步映射：每行异步外呼 HTTP 补列，容量背压（Flink AsyncFunction 口径）");
@@ -50,6 +51,7 @@ public class EtlOperatorController {
         DESC.put("union", "多路合并：多条入边接成一路（不写也可多入边天然合并）");
         DESC.put("explode", "炸行：一行拆多行（数组列炸开 / 字符串切分，UNNEST 口径）");
         DESC.put("topn", "截断：按键 / 全局 Top-N（批口径，Flink Rank 保守子集）");
+        DESC.put("limit", "截取：前 N 条放行（边流边截不整流，可配 offset）");
         DESC.put("sample", "采样：按比例放行（随机可复现 / 按键哈希）");
         DESC.put("distinct", "全行去重：整行 / 列子集判重，内存指纹 + 上限兜底");
         DESC.put("unpivot", "列转行：melt，声明列竖排成 名字列+值列");
@@ -69,6 +71,7 @@ public class EtlOperatorController {
         DESC.put("window.aggregate", "窗口聚合：事件时间窗口 + 水位触发 + 允许迟到");
         DESC.put("dedup", "键控去重：按键保留首条 / 末条，带存活时间");
         DESC.put("join", "连接：左右两路按键关联");
+        DESC.put("diff", "差异：两流按键比对出变化流（INSERT/UPDATE/DELETE，快照 diff 口径）");
         DESC.put("interval.join", "区间连接：关联键 + 事件时间区间（Flink IntervalJoin 口径）");
         DESC.put("dim.join", "维表关联：右流即维表，同键替换热更新 + TTL（broadcast-state 口径）");
         DESC.put("cep.pattern", "模式匹配：步骤序列 + 次数量词 + within 时间窗（Flink CEP 保守子集）");

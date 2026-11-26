@@ -55,6 +55,10 @@ public class WindowAggregateOperator implements Operator {
     private OutputTag lateTag;
     private long lastWatermark = Long.MIN_VALUE;
 
+    /** 计数窗口模式（{@code window: {type: count, size: N}}：按键每满 N 条结算）。 */
+    private boolean countMode;
+    private long countSize;
+
     public WindowAggregateOperator(PipelineNode node) {
         this.node = node;
     }
@@ -76,32 +80,42 @@ public class WindowAggregateOperator implements Operator {
         Map<String, Object> window = node.map("window");
         String type = MapOperator.text(window.get("type"));
         type = type == null ? "tumbling" : type.toLowerCase();
-        long size = Durations.parseMillis(MapOperator.text(window.get("size")), 0L);
-        long slide = Durations.parseMillis(MapOperator.text(window.get("slide")), 0L);
-        long gap = Durations.parseMillis(MapOperator.text(window.get("gap")), 0L);
-        long offset = Durations.parseMillis(MapOperator.text(window.get("offset")), 0L);
-        if ("tumbling".equals(type)) {
-            if (size <= 0L) {
-                throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的滚动窗口缺少 size");
-            }
-            assigner = WindowAssigners.tumbling(size, offset);
-        } else if ("sliding".equals(type)) {
-            if (size <= 0L || slide <= 0L) {
+        if ("count".equals(type)) {
+            long n = rawLong(window.get("size"));
+            if (n <= 0L) {
                 throw new IllegalArgumentException("window.aggregate 节点 " + node.getId()
-                        + " 的滑动窗口需要 size 与 slide");
+                        + " 的计数窗口缺少 size（每多少条一组，≥ 1）");
             }
-            assigner = WindowAssigners.sliding(size, slide, offset);
-        } else if ("session".equals(type)) {
-            if (gap <= 0L) {
-                throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的会话窗口缺少 gap");
-            }
-            assigner = WindowAssigners.session(gap);
-            sessionMode = true;
-        } else if ("global".equals(type)) {
-            assigner = WindowAssigners.global();
+            countMode = true;
+            countSize = n;
         } else {
-            throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的窗口类型不支持: " + type
-                    + "（可用: tumbling/sliding/session/global）");
+            long size = Durations.parseMillis(MapOperator.text(window.get("size")), 0L);
+            long slide = Durations.parseMillis(MapOperator.text(window.get("slide")), 0L);
+            long gap = Durations.parseMillis(MapOperator.text(window.get("gap")), 0L);
+            long offset = Durations.parseMillis(MapOperator.text(window.get("offset")), 0L);
+            if ("tumbling".equals(type)) {
+                if (size <= 0L) {
+                    throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的滚动窗口缺少 size");
+                }
+                assigner = WindowAssigners.tumbling(size, offset);
+            } else if ("sliding".equals(type)) {
+                if (size <= 0L || slide <= 0L) {
+                    throw new IllegalArgumentException("window.aggregate 节点 " + node.getId()
+                            + " 的滑动窗口需要 size 与 slide");
+                }
+                assigner = WindowAssigners.sliding(size, slide, offset);
+            } else if ("session".equals(type)) {
+                if (gap <= 0L) {
+                    throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的会话窗口缺少 gap");
+                }
+                assigner = WindowAssigners.session(gap);
+                sessionMode = true;
+            } else if ("global".equals(type)) {
+                assigner = WindowAssigners.global();
+            } else {
+                throw new IllegalArgumentException("window.aggregate 节点 " + node.getId() + " 的窗口类型不支持: " + type
+                        + "（可用: tumbling/sliding/session/global/count）");
+            }
         }
         allowedLateness = Durations.parseMillis(node.string("allowedLateness"), 0L);
         emitWindowBounds = node.bool("emitWindowBounds", true);
@@ -120,6 +134,10 @@ public class WindowAggregateOperator implements Operator {
         String groupKey = Keys.compute(record.row(), keyColumns);
         if (groupKey == null) {
             throw new IllegalStateException("window.aggregate 节点 " + node.getId() + " 的 keyBy 列为空，算不出分组键");
+        }
+        if (countMode) {
+            processCount(record, output, groupKey);
+            return;
         }
         Map<String, WindowState> windows = loadWindows();
         Collection<TimeWindow> assigned;
@@ -154,6 +172,10 @@ public class WindowAggregateOperator implements Operator {
 
     @Override
     public void processWatermark(long watermark) {
+        if (countMode) {
+            // 计数窗口按条数结算，不涉水位
+            return;
+        }
         lastWatermark = watermark;
         Map<String, WindowState> windows = loadWindows();
         if (windows.isEmpty()) {
@@ -185,8 +207,72 @@ public class WindowAggregateOperator implements Operator {
     }
 
     @Override
+    public void flush(Output output) {
+        if (!countMode) {
+            return;
+        }
+        // 计数窗口的尾批（不满 N 条）在流结束补发，不丢数据
+        Map<String, WindowState> windows = loadWindows();
+        for (WindowState state : windows.values()) {
+            emit(state, output);
+        }
+        windows.clear();
+        saveWindows(windows);
+    }
+
+    @Override
     public void close() {
         // 无资源
+    }
+
+    /** 计数窗口：按键每满 N 条结算发出，再开新窗（Kafka Streams 滚动计数窗口口径）。 */
+    private void processCount(Record record, Output output, String groupKey) {
+        Map<String, Long> counters = loadCounters();
+        long seen = counters.containsKey(groupKey) ? counters.get(groupKey).longValue() : 0L;
+        long batchIndex = seen / countSize;
+        Map<String, WindowState> windows = loadWindows();
+        TimeWindow batch = new TimeWindow(batchIndex * countSize, (batchIndex + 1L) * countSize);
+        WindowState state = window(windows, groupKey, batch);
+        accumulate(state, record.row());
+        state.keyValues = keyValues(record.row());
+        seen++;
+        counters.put(groupKey, Long.valueOf(seen));
+        if (seen % countSize == 0L) {
+            emit(state, output);
+            windows.remove(windowKey(groupKey, batch));
+            context.count("count-batches");
+        }
+        saveCounters(counters);
+        saveWindows(windows);
+    }
+
+    /** 取（或建）每键已见条数的计数器（随检查点持久，断点续跑编号不断档）。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Long> loadCounters() {
+        context.state().setCurrentKey("");
+        StateBackend.ValueState state = context.state().valueState("counters");
+        Map<String, Long> counters = (Map<String, Long>) state.value();
+        return counters == null ? new LinkedHashMap<String, Long>() : counters;
+    }
+
+    private void saveCounters(Map<String, Long> counters) {
+        context.state().setCurrentKey("");
+        context.state().valueState("counters").update(counters);
+    }
+
+    /** 原样读数（计数窗口的 size 是条数不是时长）。 */
+    private static long rawLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
     }
 
     @Override
@@ -279,9 +365,8 @@ public class WindowAggregateOperator implements Operator {
             row.put("windowEnd", Long.valueOf(state.end));
         }
         context.count("windows-fired");
-        output.collect(new Record(row,
-                state.end == Long.MAX_VALUE ? Record.NO_EVENT_TIME : state.end,
-                System.currentTimeMillis(), state.groupKey));
+        long eventTime = (countMode || state.end == Long.MAX_VALUE) ? Record.NO_EVENT_TIME : state.end;
+        output.collect(new Record(row, eventTime, System.currentTimeMillis(), state.groupKey));
     }
 
     /** 键列取值（结算时一起发出）。 */

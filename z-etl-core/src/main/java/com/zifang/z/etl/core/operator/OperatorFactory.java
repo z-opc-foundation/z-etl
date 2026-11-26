@@ -113,6 +113,8 @@ public final class OperatorFactory {
                 return new RouteOperator(node, sandbox);
             case MAP:
                 return new MapOperator(node, sandbox);
+            case INDEX:
+                return new IndexOperator(node);
             case SCRIPT:
                 return new ScriptOperator(node, sandbox);
             case SCRIPT_REMOTE:
@@ -133,6 +135,8 @@ public final class OperatorFactory {
                 return new DedupOperator(node);
             case JOIN:
                 return new JoinOperator(node);
+            case DIFF:
+                return new DiffOperator(node);
             case INTERVAL_JOIN:
                 return new IntervalJoinOperator(node);
             case DIM_JOIN:
@@ -145,6 +149,8 @@ public final class OperatorFactory {
                 return new ExplodeOperator(node);
             case TOPN:
                 return new TopNOperator(node);
+            case LIMIT:
+                return new LimitOperator(node);
             case SAMPLE:
                 return new SampleOperator(node);
             case DISTINCT:

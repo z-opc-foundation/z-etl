@@ -52,6 +52,9 @@ public enum OperatorType {
     /** 行级映射（表达式产出新列）。 */
     MAP("map", Kind.TRANSFORM),
 
+    /** 行号（每行编一个序号列；可按键各自编号；SQL ROW_NUMBER 无排序版的流式口径）。 */
+    INDEX("index", Kind.TRANSFORM),
+
     /** 自由脚本（z-script 沙箱；可产出一列或整行）。 */
     SCRIPT("script", Kind.TRANSFORM),
 
@@ -78,6 +81,9 @@ public enum OperatorType {
 
     /** 截断（按键 / 全局 Top-N；批口径：缓存到流尾排序产出；Flink Rank 的保守子集）。 */
     TOPN("topn", Kind.TRANSFORM),
+
+    /** 截取（前 N 条放行，边流边截不整流；SQL LIMIT 口径，可配 offset）。 */
+    LIMIT("limit", Kind.TRANSFORM),
 
     /** 采样（按比例放行：随机可复现 / 按键哈希同键同判定）。 */
     SAMPLE("sample", Kind.TRANSFORM),
@@ -135,6 +141,9 @@ public enum OperatorType {
 
     /** 连接（左右两路按键关联）。 */
     JOIN("join", Kind.STATEFUL),
+
+    /** 差异（两流按键比对出变化流 INSERT/UPDATE/DELETE；快照 diff 口径，物化）。 */
+    DIFF("diff", Kind.STATEFUL),
 
     /** 区间连接（左右两路按关联键 + 事件时间区间关联；Flink 的 IntervalJoin 口径）。 */
     INTERVAL_JOIN("interval.join", Kind.STATEFUL),
@@ -296,6 +305,18 @@ public enum OperatorType {
         if ("stats".equals(normalized) || "describe".equals(normalized)
                 || "data.profile".equals(normalized) || "column.stats".equals(normalized)) {
             return PROFILE;
+        }
+        if ("row.number".equals(normalized) || "rownum".equals(normalized)
+                || "row.numbering".equals(normalized)) {
+            return INDEX;
+        }
+        if ("head".equals(normalized) || "take".equals(normalized) || "first.n".equals(normalized)) {
+            return LIMIT;
+        }
+        if ("delta".equals(normalized) || "changes".equals(normalized)
+                || "changelog".equals(normalized) || "snapshot.diff".equals(normalized)
+                || "change.capture".equals(normalized)) {
+            return DIFF;
         }
         // 输入类型别名
         if ("csv.source".equals(normalized) || "csv".equals(normalized) || "file.csv".equals(normalized)) {

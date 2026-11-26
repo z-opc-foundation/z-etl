@@ -65,11 +65,11 @@ export default function TemplatesView({selected, onSelect, notify: notifyProp, t
     const {notify: notifySelf, toastEl: toastSelf} = useToast()
     const notify = notifyProp || notifySelf
     const toastEl = toastProp || toastSelf
-    const operators = operatorsProp || null // 缺省自取（组件直挂形态；EtlApp 传入共享缓存）
     const [ownOperators, setOwnOperators] = useState(null)
     useEffect(() => {
         if (!operatorsProp) apiGet('/etl/operators').then((d) => setOwnOperators(d.operators || [])).catch(() => {})
     }, [])
+    const operators = operatorsProp || ownOperators // 缺省自取（组件直挂形态；EtlApp 传入共享缓存）
     const [names, setNames] = useState([])
     const [mode, setMode] = useState('list') // list | detail | editor
     const [spec, setSpec] = useState(null) // 模板声明缓存

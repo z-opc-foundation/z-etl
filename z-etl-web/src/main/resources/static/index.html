@@ -90,17 +90,19 @@
   .hidden{display:none}
   h3.sec{font-size:13px;margin:14px 0 8px;color:var(--acc)}
   /* ---------- 画布编辑器 ---------- */
-  #ed-canvas{position:relative;flex:1;min-width:0;height:calc(100vh - 250px);min-height:420px;overflow:hidden;border:1px solid #d9d9d9;border-radius:8px;background:#fbfcfe;background-image:radial-gradient(#dde5ee 1px,transparent 1px);background-size:24px 24px;cursor:grab}
+  /* 编辑面板打开时撑满视口（画布吃掉剩余高度，底部不再留白）；三列等高、各自滚动 */
+  #tpl-editor-panel:not(.hidden){display:flex;flex-direction:column;height:calc(100vh - 34px);margin-bottom:0}
+  #ed-canvas{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;border:1px solid #d9d9d9;border-radius:8px;background:#fbfcfe;background-image:radial-gradient(#dde5ee 1px,transparent 1px);background-size:24px 24px;cursor:grab}
   #ed-canvas.panning{cursor:grabbing}
   #ed-world{position:absolute;left:0;top:0;transform-origin:0 0}
-  #ed-svg{position:absolute;left:0;top:0;pointer-events:none}
+  #ed-svg{position:absolute;left:-2000px;top:-2000px;pointer-events:none}
   #ed-svg path.edge{pointer-events:stroke;cursor:pointer}
-  .ed-shell{display:flex;gap:12px}
-  .ed-palette{width:190px;flex-shrink:0;overflow:auto;max-height:calc(100vh - 250px)}
+  .ed-shell{display:flex;gap:12px;flex:1;min-height:0}
+  .ed-palette{width:190px;flex-shrink:0;overflow:auto;min-height:0}
   .pal-group{font-size:12px;color:var(--dim);font-weight:600;margin:8px 0 4px}
   .pal-item{padding:5px 10px;border:1px solid #d9d9d9;border-radius:6px;margin:3px 0;cursor:pointer;font-size:12px;background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pal-item:hover{border-color:var(--acc);color:var(--acc)}
-  .ed-cfg{width:270px;flex-shrink:0;overflow:auto;max-height:calc(100vh - 250px);border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel)}
+  .ed-cfg{width:270px;flex-shrink:0;overflow:auto;min-height:0;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel)}
   .ed-cfg label{display:block;font-size:12px;color:var(--dim);margin:8px 0 4px}
   .ed-node{position:absolute;width:210px;background:#fff;border:1px solid #d9d9d9;border-left:4px solid #8c8c8c;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);user-select:none;cursor:move}
   .ed-node.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(22,119,255,.25)}
@@ -930,7 +932,7 @@ async function showJobWatermark() {
   $('jd-body').innerHTML = '<h3 class="sec">水位记录</h3>' + (res.status === 404 ? '<p style="color:var(--dim)">还没有水位</p>' : kvTable(await res.json()));
 }
 /* ---------- 模板画布编辑器（无限画布：拖拽 / 连线 / 平移缩放） ---------- */
-const ED_W = 210, ED_H = 64, ED_SVG_W = 4000, ED_SVG_H = 2400;
+const ED_W = 210, ED_H = 64, ED_SVG_W = 4000, ED_SVG_H = 2400, ED_SVG_PAD = 2000, ED_DRAG_MIN = -1800;
 let ed = null;   // {srcName, name, nodes:[{id,type,cfg,x,y}], edges:[{from,to}], sel, zoom, panX, panY, link, drag}
 
 const DEFAULT_CFG = Object.assign({}, EXAMPLES);
@@ -955,6 +957,7 @@ async function openEditor(name) {
   $('tpl-detail-panel').classList.add('hidden');
   $('tpl-editor-panel').classList.remove('hidden');
   renderEditor();
+  edZoomFit();
 }
 
 function specToEd(spec) {
@@ -1006,7 +1009,9 @@ function renderPalette() {
 }
 
 function renderEdNodes() {
-  let html = '<svg id="ed-svg" width="' + ED_SVG_W + '" height="' + ED_SVG_H + '">'
+  /* SVG 层带负偏移 viewBox：节点/连线支持负坐标（真·无限画布，往上拖不再被卡住） */
+  let html = '<svg id="ed-svg" width="' + (ED_SVG_W + ED_SVG_PAD) + '" height="' + (ED_SVG_H + ED_SVG_PAD)
+    + '" viewBox="' + (-ED_SVG_PAD) + ' ' + (-ED_SVG_PAD) + ' ' + (ED_SVG_W + ED_SVG_PAD) + ' ' + (ED_SVG_H + ED_SVG_PAD) + '">'
     + '<defs><marker id="edarw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
     + '<path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa7b4"/></marker></defs></svg>';
   ed.nodes.forEach((n, i) => {
@@ -1148,8 +1153,21 @@ function edZoomStep(k) {
 
 function edZoomFit() {
   if (!ed) return;
-  ed.zoom = 1; ed.panX = 60; ed.panY = 60;
-  $('ed-zoom-label').textContent = '100%';
+  if (!ed.nodes.length) { ed.zoom = 1; ed.panX = 60; ed.panY = 60; }
+  else {
+    /* 复位 = 内容自适应：按全部节点的包围盒取缩放与平移（负坐标节点一并入画） */
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ed.nodes.forEach(n => {
+      x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y);
+      x1 = Math.max(x1, n.x + ED_W); y1 = Math.max(y1, n.y + ED_H);
+    });
+    const cr = $('ed-canvas').getBoundingClientRect();
+    const bw = Math.max(1, x1 - x0), bh = Math.max(1, y1 - y0);
+    ed.zoom = Math.min(1.2, Math.max(0.3, Math.min((cr.width - 60) / bw, (cr.height - 60) / bh)));
+    ed.panX = (cr.width - bw * ed.zoom) / 2 - x0 * ed.zoom;
+    ed.panY = (cr.height - bh * ed.zoom) / 2 - y0 * ed.zoom;
+  }
+  $('ed-zoom-label').textContent = Math.round(ed.zoom * 100) + '%';
   applyEdTransform();
 }
 
@@ -1185,11 +1203,21 @@ function edMouseHandlers() {
       if (Math.abs(ev.clientX - d.cx) + Math.abs(ev.clientY - d.cy) > 4) d.moved = true;
       const n = ed.nodes[d.i];
       if (!n) return;
-      n.x = Math.max(8, d.nx0 + (ev.clientX - d.cx) / ed.zoom);
-      n.y = Math.max(8, d.ny0 + (ev.clientY - d.cy) / ed.zoom);
+      n.x = Math.max(ED_DRAG_MIN, d.nx0 + (ev.clientX - d.cx) / ed.zoom);
+      n.y = Math.max(ED_DRAG_MIN, d.ny0 + (ev.clientY - d.cy) / ed.zoom);
       const el = $('ed-world').querySelector('.ed-node[data-i="' + d.i + '"]');
       if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
       renderEdges();
+      /* 拖近可视边界时画布自动跟随平移（无限画布手感：往上/往左/往右拖不丢失节点） */
+      const cr = $('ed-canvas').getBoundingClientRect();
+      const sx = n.x * ed.zoom + ed.panX, sy = n.y * ed.zoom + ed.panY;
+      const edge = 36;
+      let moved = false;
+      if (sy < edge) { ed.panY += edge - sy; moved = true; }
+      if (sx < edge) { ed.panX += edge - sx; moved = true; }
+      if (sy > cr.height - edge) { ed.panY -= sy - (cr.height - edge); moved = true; }
+      if (sx > cr.width - edge) { ed.panX -= sx - (cr.width - edge); moved = true; }
+      if (moved) applyEdTransform();
     } else if (d.mode === 'link') {
       const a = ed.nodes[d.i];
       if (!a) return;

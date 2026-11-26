@@ -8,6 +8,7 @@ import com.zifang.z.etl.core.runtime.Record;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
 import com.zifang.z.etl.core.transform.TypeNormalizer;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,9 @@ import java.util.Map;
  * <p>两种产出模式：
  * <ul>
  *   <li>{@code column}（默认）：脚本算一个值 → 落进 {@code name} 指定的列；</li>
- *   <li>{@code row}：脚本返回一张 Map → **整行替换**（做整行重塑、拼装新结构最顺手）。</li>
+ *   <li>{@code row}：脚本返回一张 Map → **整行替换**（做整行重塑、拼装新结构最顺手）；</li>
+ *   <li>{@code flat}：脚本返回数组 → **逐元素出一行**（Flink FlatMapFunction 口径）——
+ *       元素是 Map 就当整行，是标量就落进 {@code name} 声明的列；null 元素跳过并计数。</li>
  * </ul>
  *
  * <p>安全闸三道（与旧引擎同口径）：沙箱（编译期 AST 黑名单）、墙钟超时、单步产出上限。
@@ -42,6 +45,8 @@ public class ScriptOperator implements Operator {
     public static final String MODE_COLUMN = "column";
     /** 产出模式：整行替换。 */
     public static final String MODE_ROW = "row";
+    /** 产出模式：一进多出（数组逐元素出一行）。 */
+    public static final String MODE_FLAT = "flat";
 
     private final PipelineNode node;
     private final ScriptSandbox sandbox;
@@ -54,6 +59,7 @@ public class ScriptOperator implements Operator {
     private boolean nullable = true;
     private long timeoutMs;
     private int maxOutputChars;
+    private OperatorContext context;
 
     public ScriptOperator(PipelineNode node, ScriptSandbox sandbox) {
         this.node = node;
@@ -62,6 +68,7 @@ public class ScriptOperator implements Operator {
 
     @Override
     public void open(OperatorContext context) {
+        this.context = context;
         script = node.string("script");
         if (script == null) {
             throw new IllegalArgumentException("script 节点 " + node.getId() + " 缺少 script");
@@ -79,6 +86,10 @@ public class ScriptOperator implements Operator {
         if (MODE_COLUMN.equals(mode) && name == null) {
             throw new IllegalArgumentException("script 节点 " + node.getId() + " 的 mode=column 必须声明 name");
         }
+        if (MODE_FLAT.equals(mode) && type != null) {
+            throw new IllegalArgumentException("script 节点 " + node.getId() + " 的 mode=flat 不支持 type"
+                    + "（元素是 Map 就整行、标量落 name 列；要类型归一在下游挂 type.normalize）");
+        }
         if (!"GROOVY".equals(engine) && !"EL".equals(engine)) {
             throw new IllegalArgumentException("script 节点 " + node.getId() + " 的引擎不支持: " + engine
                     + "（LUA 执行器无沙箱无超时、实测可逃逸 ⇒ 硬拒绝）");
@@ -92,6 +103,10 @@ public class ScriptOperator implements Operator {
     public void processElement(Record record, Output output) {
         Object value = evaluate(record.row());
         Map<String, Object> row = record.row();
+        if (MODE_FLAT.equals(mode)) {
+            emitFlat(record, value, output);
+            return;
+        }
         if (MODE_ROW.equals(mode)) {
             if (value == null) {
                 throw new IllegalStateException("script 节点 " + node.getId() + " 的 mode=row 脚本返回了 null");
@@ -109,6 +124,46 @@ public class ScriptOperator implements Operator {
         Map<String, Object> newRow = new LinkedHashMap<String, Object>(row);
         newRow.put(name, coerced);
         output.collect(record.withRow(newRow));
+    }
+
+    /**
+     * flat 模式：数组逐元素出一行（非数组返回值当单元素）。
+     *
+     * <p>元素是 Map ⇒ 整行替换；标量 ⇒ 原行 + {@code name} 列（没声明 name 直接报错，
+     * 不静默造 {@code value} 之类的魔法列）；null 元素跳过并计数；返回 null ⇒ 丢行并计数。
+     */
+    private void emitFlat(Record record, Object value, Output output) {
+        if (value == null) {
+            context.count("flat-null-result");
+            return;
+        }
+        List<Object> elements;
+        if (value instanceof List) {
+            elements = (List<Object>) value;
+        } else if (value instanceof Object[]) {
+            elements = new ArrayList<Object>(java.util.Arrays.asList((Object[]) value));
+        } else {
+            elements = java.util.Collections.singletonList(value);
+        }
+        for (Object element : elements) {
+            if (element == null) {
+                context.count("flat-null-element");
+                continue;
+            }
+            if (element instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> newRow = new LinkedHashMap<String, Object>((Map<String, Object>) element);
+                output.collect(record.withRow(newRow));
+                continue;
+            }
+            if (name == null) {
+                throw new IllegalStateException("script 节点 " + node.getId() + " 的 mode=flat 遇到标量元素，"
+                        + "必须声明 name（标量落进 name 列）");
+            }
+            Map<String, Object> newRow = new LinkedHashMap<String, Object>(record.row());
+            newRow.put(name, element);
+            output.collect(record.withRow(newRow));
+        }
     }
 
     /** 执行脚本；超时 / 超限 / 失败一律抛（不静默吞）。 */

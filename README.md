@@ -282,8 +282,9 @@ edges:
 | `message.source` | 源 | 从消息总线消费（Kafka / RocketMQ / 库表队列） | `topic/pollSize` |
 | `pipeline.ref` | 源 | **子管道引用**（管道当视图）：引用已登记管道，子管道的汇全部换成 collect（只取产出不落地）、不读不写水位与状态；`params` 透传占位符；嵌套超 8 层报错 | `name/params/eventTimeColumn` |
 | `filter` | 变换 | 表达式过滤；未命中可走旁路 | `expression/engine/negated/rejectedTo` |
+| `route` | 变换 | **n 路条件分流**（Kafka Streams `branch()` 口径）：`rules` 声明序逐条判定**命中即走**（一条行只进一个分支，标签 id = 目标节点 id），`fallback` 兜底全不命中（省略则丢行计数）；节点**无主输出**（声明出边校验器直接报错）；表达式引擎 EL（默认）/ GROOVY 可按条声明 | `rules: [{to,expression,engine,timeoutMs}]/fallback` |
 | `map` | 变换 | 表达式产新列 | `columns: [{name,expression,engine,type}]` |
-| `script` | 变换 | 自由脚本（z-script 沙箱）；产一列或整行替换 | `script/engine/mode/name/timeoutMs/maxOutputChars` |
+| `script` | 变换 | 自由脚本（z-script 沙箱）；`mode: column` 产一列 / `row` 整行替换 / **`flat` 一进多出**（Flink FlatMapFunction 口径：返回数组逐元素出一行，元素是 Map 就整行、标量落 `name` 列、null 跳过计数、非数组当单元素） | `script/engine/mode/name/timeoutMs/maxOutputChars` |
 | `script.remote` | 变换 | **平台脚本（打通 z-script 脚本中心）**：按 `scriptCode` 调已上线脚本（版本 / 灰度 / 配额 / 审计那套），整行 JSON 当执行参数，鉴权 `X-Api-Key`（app + AK 口径）；`success=false` 或 HTTP 非 2xx 抛错不静默吞；产出与本地脚本算子同形（column 落一列 / row 整行替换）。与本地 `script` 分工：现写的清洗逻辑用本地沙箱，沉淀到脚本中心的用本算子引用，改脚本不动管道 | `baseUrl/scriptCode/apiKey/mode/name/type/nullable/timeoutMs` |
 | `regex.extract` | 变换 | **正则提取**：声明列跑正则，捕获组落列（`outputs` 组名或序号 → 列名）；不匹配缺省输出列全 null 并计数 `no-match`，`onNoMatch: drop` 丢行 | `column/pattern/outputs/onNoMatch` |
 | `split` | 变换 | **分列**：声明列按 `separator` 切开落进 `names` 声明的输出列；段数不足补 null；缺省原列替换（`keepOriginal: true` 保留） | `column/separator/names/keepOriginal` |
@@ -295,6 +296,7 @@ edges:
 | `mask` | 变换 | **脱敏**（给下游共享前的最后一道闸）：`masks` 列名 → 规则，`phone`（11 位保前 3 后 4）/`email`（保首字符与域名）/`half`（保前 1/4 其余 *）/`full`（全 *）；phone 规则碰非 11 位走 half 兜底；null 不动 | `masks` |
 | `date.format` | 变换 | **时间格式化**：epoch 毫秒 / ISO / `fromPattern` 自定义三口径输入 → `toPattern` 目标格式（缺省 `yyyy-MM-dd HH:mm:ss`）；`name` 缺省原地覆盖；解析失败炸行（静默 null 更危险）；Timestamp / Date 值直接吃 | `column/fromPattern/toPattern/name` |
 | `sort` | 变换 | **排序**（物化整流）：按 `columns` 多列排序（前缀 `-` 降序）；数值按数值比、其余按字符串（码点）序、null 排最后；⚠️ 要收齐全流才出第一行，只适合有界数据 | `columns` |
+| `profile` | 变换 | **列画像**（Spark describe 的流式口径）：行**原样透传**不改一字，流尾按列出画像行（`column/rows/nulls/distinct/min/max/mean`，min/max 数值按数值比其余按码点序、mean 只对数值列算）走 `reportTo` 旁路（没声明只落节点指标）；`distinctCap` 封顶去重计数防高基数列撑内存 | `reportTo/distinctCap` |
 | `async.map` | 变换 | **异步映射**（Flink AsyncFunction 口径）：每行异步外呼 HTTP 补列；`capacity` 容量背压（在途满阻塞等一个）、`outputMode` ordered/unordered、流结束 flush 把在途全发出；`onError` fail/skip | `url({列}模板)/method/headers/bodyColumns/fields/timeoutMs/capacity/outputMode/onError/allowedHosts` |
 | `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
 | `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
@@ -305,6 +307,7 @@ edges:
 | `sample` | 变换 | **采样**（按比例放行，丢数据口径）：`seed` 声明后随机采样可复现；`hashBy` 按键哈希采样同键永远同判定（同一键的行要么全留要么全丢）且天然可复现；行原样放行只计数 | `rate/seed/hashBy` |
 | `distinct` | 变换 | **全行去重**（首次出现放行、重复丢掉）：缺省整行所有列拼指纹判重，`columns` 声明后按列子集；指纹超 `cap`（缺省 100000）后新行不再跟踪但**照常放行**并计数 `cap-overflow`（宁多放不漏放）；内存 set 不进键控状态（检查点不背） | `columns/cap` |
 | `unpivot` | 变换 | **列转行**（melt，explode 的横向互补）：声明列逐列竖排成「名字列 + 值列」，未声明列原样保留；null 缺省丢并计数 `null-skipped`（`keepNull: true` 也出一行）；无状态 | `columns/nameColumn/valueColumn/keepNull` |
+| `pivot` | 变换 | **行转列**（unpivot 的对偶，Spark pivot 口径）：`keyBy` 分组 + 透视列值变列名 + `value`/`fn` 聚合（白名单 SUM/COUNT/AVG/MIN/MAX/FIRST/LAST）；输出行 = 分组列 + 每透视值一列，缺格补 null；`columns` 显式定列序（缺省首次出现序）；无 keyBy = 全局一行；⚠️ 物化口径只适合有界数据；fn=COUNT 可省 value | `keyBy/pivot/value/fn/columns` |
 | `aggregate` | 有状态 | 键控聚合，滚动累计（Kafka Streams 口径：每条输入发一次）；函数白名单 `SUM/COUNT/AVG/MIN/MAX/FIRST/LAST/COLLECT_LIST/COLLECT_SET`（收集收成数组：跳过 null、产出为当时快照、单键封顶 65536 超出丢并计数 `collect-truncated`；SET 同值只收一次保持插入序；配下游 `explode` 可「聚合再还原」；SQL 下推不支持收集，仍限 `SUM/COUNT/AVG/MIN/MAX`） | `keyBy/aggregates: [{fn,column,alias}]` |
 | `window.aggregate` | 有状态 | 事件时间窗口聚合：tumbling/sliding/session/global，水位触发，迟到重发；`lateTo` 把**超窗丢弃的迟到行**原样走侧输出（有去处，不只丢计数） | `keyBy/window{type,size,slide,gap,offset}/allowedLateness/lateTo/aggregates` |
 | `dedup` | 有状态 | 按键去重（保留 first/last，带存活时间）；`duplicateTo` 把被挤掉的行原样走侧输出（有去处，不只丢计数） | `keyBy/keep/ttl/duplicateTo` |
@@ -323,7 +326,8 @@ edges:
 | `collect.sink` | 汇 | 收进内存列表（测试/预览） | — |
 
 类型串别名（写起来更省事）：`csv.source` / `json.source` / `excel.source` / `rest.source` /
-`kafka.source` / `kafka.sink` / `webhook.sink` / `mq.source` / `mq.sink` 等。
+`kafka.source` / `kafka.sink` / `webhook.sink` / `mq.source` / `mq.sink` /
+`switch` / `branch`（→ route）/ `spread` / `cross.tab`（→ pivot）/ `stats` / `describe`（→ profile）等。
 
 **输入输出两侧共用一条水位口径**：所有源都实现 `PullSource`（拉一条 + 报水位 + 报游标），
 所有汇都实现 `CountingSink`（报写了多少行）⇒ 执行器对「换一种输入 / 输出」零改动。
@@ -438,7 +442,7 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 |---|---|---|
 | `PushDownFilterRewriter` | filter 节点显式声明的 SQL 谓词（`config.sql`）并入源 WHERE | 只沿「行保持」链（filter/map/script(落列)/type.normalize）上溯；链上有 `field.mapping` 就不推；EL/GROOVY **不翻译**成 SQL，不猜 |
 | `MergeMapRewriter` | 相邻两个 `map` 并成一个（列清单合并，语义等价：表达式都在累积行上求值） | 上游有扇出/扇入不并 |
-| `EliminateUnusedRewriter` | 到不了任何汇的死节点摘掉 | `rejectedTo` 指名的节点不算死 |
+| `EliminateUnusedRewriter` | 到不了任何汇的死节点摘掉 | `rejectedTo` 指名的节点不算死；**旁路声明当虚拟边参与反向可达铺开**（`rejectedTo`/`lateTo`/`duplicateTo`/`route.rules[].to`+`fallback`/`profile.reportTo` → 声明节点也保活 —— route 这类无主输出节点全靠标签喂下游） |
 | `ProjectionPushdownRewriter` | 下游用得上的列回推到源库 SELECT 列表 | 只对 `jdbc.source` 生效；源必须**已声明列清单**；链上必须有 `field.mapping` 收敛输出列；**水位列 / 平局列必保**；join / 整行脚本 / 多路异构合并不裁 |
 | `AggregatePushdownRewriter` | 源声明了 `pushdown.groupBy/aggregates` ⇒ 摘掉引擎侧重复计算的 `aggregate` 节点 | 下推**必须用户在源上显式声明**；聚合声明要与节点**逐条一致**（分组列集合 + fn/column/alias）；**下游列守卫**：下游用到的列必须都在「分组列 + 聚合别名」里，否则不摘；聚合下推与 `eventTimeColumn` **互斥** |
 
@@ -458,6 +462,8 @@ engineB.importSavepoint(json, "daily-v2"); // 或换名迁移（作业复制）
 5. 聚合表达式**不是自由 SQL**：函数名走白名单（`SUM/COUNT/AVG/MIN/MAX`）、列名走标识符白名单。
 
 **运行时就会优化**：执行器跑之前先做一遍优化（改写副本，不动调用方的声明），优化备注写进运行结果。
+**声明校验先于优化**（配置错误要报「错在哪」，不能被死节点摘除搅成「没有源节点」这类迷惑性报错），
+优化后的最终计划再校验一道兜底。
 优化器会拿 **JDBC 元数据**里的源表列清单（`JdbcTableSchemaResolver`）来判定「下游引用的列还在不在」——
 拿不到就按「不知道」保守处理。
 计划长什么样跑之前可以看：`new PlanOptimizer().explain(spec)`（拓扑序文本计划 + 优化备注）。
@@ -541,7 +547,7 @@ core 主代码不耦合 z-wf（依赖 test scope）；生产编排时把依赖�
 
 ```bash
 mvn clean install        # 2 个模块，Java 17 编译（代码保持 Java 8 风格）；发版改根 pom <revision> 一处
-mvn -o test              # 252 个用例（core 239 + web 13）
+mvn -o test              # 266 个用例（core 253 + web 13）
 ```
 
 > ⚠️ **跑测试请用 JDK 17**（pom target 17）：脚本沙箱用例依赖 z-script 的 Groovy 3.0.9，

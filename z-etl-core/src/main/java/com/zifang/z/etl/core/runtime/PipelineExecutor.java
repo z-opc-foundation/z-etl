@@ -173,6 +173,8 @@ public class PipelineExecutor {
                                      long sampleRows) throws Exception {
         boolean dryRun = sampleRows > 0L;
         long start = System.currentTimeMillis();
+        // —— 声明校验（先于优化：配置错误要报「错在哪」，不能被死节点摘除搅成迷惑性报错）——
+        PipelineValidator.validate(spec);
         // —— 计划优化（过滤下推 / 投影下推 / 聚合下推 / 合并映射 / 摘死节点）——
         // 优化会改写声明 ⇒ 先深拷贝一份，别把调用方的对象改了
         // 表结构解析交给优化器：依赖列集合的规则（聚合下推）要靠它判定「下游引用的列还在不在」

@@ -109,6 +109,8 @@ public final class OperatorFactory {
                 return new PipelineRefSource(node, provider, sandbox, resolver);
             case FILTER:
                 return new FilterOperator(node, sandbox);
+            case ROUTE:
+                return new RouteOperator(node, sandbox);
             case MAP:
                 return new MapOperator(node, sandbox);
             case SCRIPT:
@@ -149,6 +151,8 @@ public final class OperatorFactory {
                 return new DistinctOperator(node);
             case UNPIVOT:
                 return new UnpivotOperator(node);
+            case PIVOT:
+                return new PivotOperator(node);
             case REGEX_EXTRACT:
                 return new RegexExtractOperator(node);
             case SPLIT:
@@ -169,6 +173,8 @@ public final class OperatorFactory {
                 return new DateFormatOperator(node);
             case SORT:
                 return new SortOperator(node);
+            case PROFILE:
+                return new ProfileOperator(node);
             case JDBC_SINK:
                 return new SinkOperators.JdbcSink(node, provider.resolve(node.string("dataSourceRef")));
             case FILE_CSV_SINK:

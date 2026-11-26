@@ -134,6 +134,40 @@ public final class PipelineValidator {
                             + " 必须声明 steps（至少一步 name/expression）");
                 }
             }
+            if (type == OperatorType.ROUTE) {
+                if (node.mapList("rules").isEmpty()) {
+                    throw new IllegalArgumentException("route 节点 " + node.getId()
+                            + " 必须声明 rules（至少一条 to/expression）");
+                }
+                for (Map<String, Object> rule : node.mapList("rules")) {
+                    String to = rule.get("to") == null ? null : String.valueOf(rule.get("to")).trim();
+                    Object expression = rule.get("expression") == null ? rule.get("predicate") : rule.get("expression");
+                    if (to == null || to.isEmpty()) {
+                        throw new IllegalArgumentException("route 节点 " + node.getId() + " 的 rules 里有一条缺少 to");
+                    }
+                    if (expression == null || String.valueOf(expression).trim().isEmpty()) {
+                        throw new IllegalArgumentException("route 节点 " + node.getId() + " 的 rules[" + to
+                                + "] 缺少 expression");
+                    }
+                }
+                if (!out.isEmpty()) {
+                    throw new IllegalArgumentException("route 节点 " + node.getId()
+                            + " 不允许有出边（分流全走旁路标签：rules[].to 与 fallback 指名去处）");
+                }
+            }
+            if (type == OperatorType.PIVOT) {
+                String pivot = node.string("pivot");
+                if (pivot == null || pivot.trim().isEmpty()) {
+                    throw new IllegalArgumentException("pivot 节点 " + node.getId()
+                            + " 必须声明 config.pivot（值转列名的列）");
+                }
+                String fn = node.string("fn", "SUM").trim().toUpperCase();
+                String value = node.string("value");
+                if ((value == null || value.trim().isEmpty()) && !"COUNT".equals(fn)) {
+                    throw new IllegalArgumentException("pivot 节点 " + node.getId()
+                            + " 必须声明 config.value（fn=COUNT 除外）");
+                }
+            }
             if (type == OperatorType.JOIN || type == OperatorType.INTERVAL_JOIN
                         || type == OperatorType.DIM_JOIN) {
                 if (in.size() != 2) {

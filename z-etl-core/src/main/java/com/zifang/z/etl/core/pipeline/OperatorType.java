@@ -46,6 +46,9 @@ public enum OperatorType {
     /** 过滤（表达式为真才放行；未命中可走旁路输出）。 */
     FILTER("filter", Kind.TRANSFORM),
 
+    /** 路由（n 路条件分流：rules 顺序判定命中即走旁路标签，fallback 兜底；节点无主输出）。 */
+    ROUTE("route", Kind.TRANSFORM),
+
     /** 行级映射（表达式产出新列）。 */
     MAP("map", Kind.TRANSFORM),
 
@@ -85,6 +88,9 @@ public enum OperatorType {
     /** 列转行（melt：声明列逐列竖排成 名字列+值列，其余列原样保留；explode 的横向互补）。 */
     UNPIVOT("unpivot", Kind.TRANSFORM),
 
+    /** 行转列（pivot：keyBy 分组 + 透视列值变列名 + 聚合；unpivot 的对偶，物化口径）。 */
+    PIVOT("pivot", Kind.TRANSFORM),
+
     /** 正则提取（捕获组落列；不匹配可给 null 或丢行）。 */
     REGEX_EXTRACT("regex.extract", Kind.TRANSFORM),
 
@@ -114,6 +120,9 @@ public enum OperatorType {
 
     /** 排序（物化整流；只适合有界数据）。 */
     SORT("sort", Kind.TRANSFORM),
+
+    /** 列画像（行原样透传，流尾按列出 count/nulls/distinct/min/max/mean 画像行走旁路）。 */
+    PROFILE("profile", Kind.TRANSFORM),
 
     /** 键控聚合（无窗口，滚动累计值，键变化即发一次）。 */
     AGGREGATE("aggregate", Kind.STATEFUL),
@@ -276,6 +285,17 @@ public enum OperatorType {
         if ("assert".equals(normalized) || "quality.assert".equals(normalized)
                 || "quality.gate".equals(normalized) || "check".equals(normalized)) {
             return ASSERT;
+        }
+        if ("switch".equals(normalized) || "branch".equals(normalized) || "router".equals(normalized)) {
+            return ROUTE;
+        }
+        if ("spread".equals(normalized) || "rows.to.columns".equals(normalized)
+                || "cross.tab".equals(normalized) || "crosstab".equals(normalized)) {
+            return PIVOT;
+        }
+        if ("stats".equals(normalized) || "describe".equals(normalized)
+                || "data.profile".equals(normalized) || "column.stats".equals(normalized)) {
+            return PROFILE;
         }
         // 输入类型别名
         if ("csv.source".equals(normalized) || "csv".equals(normalized) || "file.csv".equals(normalized)) {

@@ -39,6 +39,7 @@ public class EtlOperatorController {
         DESC.put("message.source", "消息源：Kafka / RocketMQ / 库表队列经 MessageBus SPI");
         DESC.put("pipeline.ref", "子管道引用源：已登记管道当视图复用（汇换收集、不碰水位）");
         DESC.put("filter", "过滤：表达式为真才放行，未命中可走旁路输出");
+        DESC.put("route", "路由：n 路条件分流，rules 顺序判定命中即走旁路，fallback 兜底");
         DESC.put("map", "行级映射：表达式产出新列");
         DESC.put("script", "自由脚本：z-script 沙箱，可产出一列或整行");
         DESC.put("script.remote", "平台脚本：调 z-script 脚本中心已上线脚本（app + AK）");
@@ -52,6 +53,7 @@ public class EtlOperatorController {
         DESC.put("sample", "采样：按比例放行（随机可复现 / 按键哈希）");
         DESC.put("distinct", "全行去重：整行 / 列子集判重，内存指纹 + 上限兜底");
         DESC.put("unpivot", "列转行：melt，声明列竖排成 名字列+值列");
+        DESC.put("pivot", "行转列：keyBy 分组 + 透视列值变列名 + 聚合（物化口径）");
         DESC.put("regex.extract", "正则提取：捕获组落列，不匹配可 null 或丢行");
         DESC.put("split", "分列：按分隔符切进声明的输出列名");
         DESC.put("template", "模板合成：${列名} 占位符拼串落声明列");
@@ -62,6 +64,7 @@ public class EtlOperatorController {
         DESC.put("mask", "脱敏：phone / email / half / full 四种打码规则");
         DESC.put("date.format", "时间格式化：epoch / ISO / 自定义格式 → 目标格式");
         DESC.put("sort", "排序：物化整流，只适合有界数据");
+        DESC.put("profile", "列画像：行原样透传，流尾按列出 rows/nulls/distinct/min/max/mean 画像行");
         DESC.put("aggregate", "键控聚合：无窗口滚动累计，键变化即发一次");
         DESC.put("window.aggregate", "窗口聚合：事件时间窗口 + 水位触发 + 允许迟到");
         DESC.put("dedup", "键控去重：按键保留首条 / 末条，带存活时间");

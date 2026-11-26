@@ -97,8 +97,8 @@ public class FilterOperator implements Operator {
         }
     }
 
-    /** 结果归布尔：Boolean / 数字（非零）/ 字符串（true/1/yes）。 */
-    private static boolean toBoolean(Object value) {
+    /** 结果归布尔：Boolean / 数字（非零）/ 字符串（true/1/yes）。包内可见（route 算子复用）。 */
+    static boolean toBoolean(Object value) {
         if (value == null) {
             return false;
         }

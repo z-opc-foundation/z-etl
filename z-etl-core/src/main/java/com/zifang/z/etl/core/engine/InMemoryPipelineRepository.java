@@ -59,6 +59,19 @@ public class InMemoryPipelineRepository implements PipelineRepository {
         return new ArrayList<PipelineRunResult>(history.subList(0, limit));
     }
 
+    @Override
+    public List<PipelineRunResult> recentRuns(int limit) {
+        List<PipelineRunResult> all = new ArrayList<PipelineRunResult>();
+        for (List<PipelineRunResult> history : runs.values()) {
+            all.addAll(history);
+        }
+        all.sort((a, b) -> Long.compare(b.getStartedAt(), a.getStartedAt()));
+        if (limit <= 0 || all.size() <= limit) {
+            return all;
+        }
+        return new ArrayList<PipelineRunResult>(all.subList(0, limit));
+    }
+
     /** 定义原文（取回时重新序列化，保证内容同源）。 */
     public String toYaml(String name) {
         PipelineSpec spec = find(name);

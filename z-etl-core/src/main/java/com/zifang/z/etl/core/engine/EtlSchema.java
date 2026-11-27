@@ -33,6 +33,8 @@ public final class EtlSchema {
     public static final String TABLE_MESSAGE_OUTBOX = "etl_message_outbox";
     /** 流水线调度登记表（cron 表达式 + 上次触发时间）。 */
     public static final String TABLE_PIPELINE_SCHEDULE = "etl_pipeline_schedule";
+    /** 数据源登记表（数据源管理页；凭据属运行时数据，凭据管控最终归 z-dms/z-mist）。 */
+    public static final String TABLE_DATASOURCE = "etl_datasource";
 
     private static final String[] DDL = new String[]{
             "CREATE TABLE IF NOT EXISTS " + TABLE_JOB_DEF + " ("
@@ -84,6 +86,7 @@ public final class EtlSchema {
                     + "run_id VARCHAR(64) PRIMARY KEY, "
                     + "pipeline_name VARCHAR(128), "
                     + "mode VARCHAR(32), "
+                    + "status VARCHAR(16), "
                     + "records_read BIGINT, "
                     + "records_written BIGINT, "
                     + "watermark_before VARCHAR(256), "
@@ -107,6 +110,16 @@ public final class EtlSchema {
                     + "enabled INT, "
                     + "last_triggered_at BIGINT, "
                     + "created_at BIGINT, "
+                    + "updated_at BIGINT)",
+            // 数据源登记：数据源管理页的落库处；password 只落库不出网（列表/详情一律掩码）
+            "CREATE TABLE IF NOT EXISTS " + TABLE_DATASOURCE + " ("
+                    + "ds_name VARCHAR(128) PRIMARY KEY, "
+                    + "ds_type VARCHAR(32), "
+                    + "url VARCHAR(512), "
+                    + "username VARCHAR(128), "
+                    + "password VARCHAR(256), "
+                    + "description VARCHAR(512), "
+                    + "created_at BIGINT, "
                     + "updated_at BIGINT)"
     };
 
@@ -120,7 +133,9 @@ public final class EtlSchema {
      */
     private static final String[] COLUMN_ADDITIONS = new String[]{
             "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_column VARCHAR(128)",
-            "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_value VARCHAR(256)"
+            "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_value VARCHAR(256)",
+            // 运行总览（046）：失败运行也落履历，老库补 status 列（旧行缺省当 SUCCESS）
+            "ALTER TABLE " + TABLE_PIPELINE_RUN + " ADD COLUMN status VARCHAR(16)"
     };
 
     private EtlSchema() {

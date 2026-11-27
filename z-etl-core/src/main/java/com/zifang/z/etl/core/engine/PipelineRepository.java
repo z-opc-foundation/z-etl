@@ -25,4 +25,7 @@ public interface PipelineRepository {
 
     /** 运行履历（新→旧）；{@code limit ≤ 0} 不限。 */
     List<PipelineRunResult> runHistory(String name, int limit);
+
+    /** 跨流水线最近运行（新→旧，运行总览用）；{@code limit ≤ 0} 不限。 */
+    List<PipelineRunResult> recentRuns(int limit);
 }

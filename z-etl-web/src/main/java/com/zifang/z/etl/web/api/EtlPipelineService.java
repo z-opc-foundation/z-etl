@@ -81,6 +81,101 @@ public class EtlPipelineService {
     }
 
     /**
+     * 运行总览：窗口计数 + 每条流水线的最近一次运行 + 调度登记。
+     *
+     * @param recentLimit 最近运行明细条数
+     */
+    @BizMethod(name = "运行总览", module = "z-etl",
+            description = "近 24h/7d 成功失败计数 + 每条流水线最近一次运行 + 调度登记（运行总览页数据面）。", operation = BizMethod.Operation.QUERY)
+    public Map<String, Object> overview(int recentLimit) {
+        List<PipelineRunResult> runs = pipelineEngine.recentRuns(500);
+        long now = System.currentTimeMillis();
+        long start24h = now - 24L * 3600L * 1000L;
+        long start7d = now - 7L * 24L * 3600L * 1000L;
+        Map<String, Object> h24 = windowCounts(runs, start24h);
+        Map<String, Object> d7 = windowCounts(runs, start7d);
+
+        Map<String, PipelineRunResult> lastByPipeline = new LinkedHashMap<String, PipelineRunResult>();
+        for (PipelineRunResult run : runs) {
+            if (!lastByPipeline.containsKey(run.getPipelineName())) {
+                lastByPipeline.put(run.getPipelineName(), run);
+            }
+        }
+        List<Map<String, Object>> pipelines = new java.util.ArrayList<Map<String, Object>>();
+        for (String name : pipelineEngine.listNames()) {
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            row.put("name", name);
+            PipelineRunResult last = lastByPipeline.get(name);
+            if (last != null) {
+                row.put("lastStatus", last.getStatus());
+                row.put("lastStartedAt", Long.valueOf(last.getStartedAt()));
+                row.put("lastDurationMs", Long.valueOf(last.durationMs()));
+                row.put("lastRecordsRead", Long.valueOf(last.getRecordsRead()));
+                row.put("lastRecordsWritten", Long.valueOf(last.getRecordsWritten()));
+            } else {
+                row.put("lastStatus", null);
+            }
+            PipelineSchedule schedule = schedule(name);
+            if (schedule != null) {
+                Map<String, Object> sched = new LinkedHashMap<String, Object>();
+                sched.put("cronExpression", schedule.getCronExpression());
+                sched.put("enabled", Boolean.valueOf(schedule.isEnabled()));
+                sched.put("nextFireTime", schedule.getNextFireTime());
+                row.put("schedule", sched);
+            } else {
+                row.put("schedule", null);
+            }
+            pipelines.add(row);
+        }
+
+        List<Map<String, Object>> recent = new java.util.ArrayList<Map<String, Object>>();
+        int limit = recentLimit <= 0 ? 20 : Math.min(recentLimit, 200);
+        for (PipelineRunResult run : runs) {
+            if (recent.size() >= limit) {
+                break;
+            }
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            row.put("pipeline", run.getPipelineName());
+            row.put("status", run.getStatus());
+            row.put("mode", run.getMode());
+            row.put("startedAt", Long.valueOf(run.getStartedAt()));
+            row.put("durationMs", Long.valueOf(run.durationMs()));
+            row.put("recordsRead", Long.valueOf(run.getRecordsRead()));
+            row.put("recordsWritten", Long.valueOf(run.getRecordsWritten()));
+            row.put("notes", run.getNotes());
+            recent.add(row);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("h24", h24);
+        body.put("d7", d7);
+        body.put("pipelines", pipelines);
+        body.put("recentRuns", recent);
+        return body;
+    }
+
+    /** 窗口计数（成功 / 失败 / 总数）。 */
+    private static Map<String, Object> windowCounts(List<PipelineRunResult> runs, long windowStart) {
+        int success = 0;
+        int failed = 0;
+        for (PipelineRunResult run : runs) {
+            if (run.getStartedAt() < windowStart) {
+                continue;
+            }
+            if (PipelineRunResult.STATUS_FAILED.equals(run.getStatus())) {
+                failed++;
+            } else {
+                success++;
+            }
+        }
+        Map<String, Object> counts = new LinkedHashMap<String, Object>();
+        counts.put("success", Integer.valueOf(success));
+        counts.put("failed", Integer.valueOf(failed));
+        counts.put("total", Integer.valueOf(success + failed));
+        return counts;
+    }
+
+    /**
      * 取消调度。
      */
     @BizMethod(name = "取消流水线调度", module = "z-etl", description = "取消流水线调度。", operation = BizMethod.Operation.ACTION)

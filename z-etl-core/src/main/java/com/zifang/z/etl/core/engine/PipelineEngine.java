@@ -153,11 +153,16 @@ public class PipelineEngine {
         RetrySpec retry = spec.getRetry() == null ? new RetrySpec() : spec.getRetry();
         int maxAttempts = retry.effectiveMaxAttempts();
         if (maxAttempts == 1) {
-            // 不声明重试 ⇒ 异常原样抛出（行为与从前完全一致）
-            PipelineRunResult result = runOnce(spec);
-            repository.saveRun(result);
-            touchSchedule(name);
-            return result;
+            // 不声明重试 ⇒ 异常原样抛出（行为与从前完全一致）；失败也落履历（运行总览口径）
+            try {
+                PipelineRunResult result = runOnce(spec);
+                repository.saveRun(result);
+                touchSchedule(name);
+                return result;
+            } catch (Exception e) {
+                repository.saveRun(failedRun(name, e));
+                throw e;
+            }
         }
         Exception last = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -176,8 +181,22 @@ public class PipelineEngine {
                 }
             }
         }
+        repository.saveRun(failedRun(name, last));
         throw new IllegalStateException("流水线 " + name + " 连续 " + maxAttempts
                 + " 次失败（最后一次: " + (last == null ? "未知" : last.getMessage()) + "）", last);
+    }
+
+    /** 失败运行履历：状态 FAILED，异常摘要进 notes（履历分隔符「；」替换掉，避免拆散）。 */
+    private PipelineRunResult failedRun(String name, Exception cause) {
+        PipelineRunResult result = new PipelineRunResult();
+        result.setPipelineName(name);
+        result.setStatus(PipelineRunResult.STATUS_FAILED);
+        long now = System.currentTimeMillis();
+        result.setStartedAt(now);
+        result.setFinishedAt(now);
+        String message = cause == null ? "未知错误" : (cause.getClass().getSimpleName() + ": " + cause.getMessage());
+        result.addNote(message.replace("；", "; "));
+        return result;
     }
 
     /**
@@ -269,6 +288,11 @@ public class PipelineEngine {
     /** 运行履历（新→旧）。 */
     public List<PipelineRunResult> history(String name, int limit) {
         return repository.runHistory(name, limit);
+    }
+
+    /** 跨流水线最近运行（新→旧，运行总览用）；{@code limit ≤ 0} 不限。 */
+    public List<PipelineRunResult> recentRuns(int limit) {
+        return repository.recentRuns(limit);
     }
 
     /**

@@ -15,8 +15,14 @@ import java.util.Map;
  */
 public class PipelineRunResult {
 
+    /** 运行成功。 */
+    public static final String STATUS_SUCCESS = "SUCCESS";
+    /** 运行失败（重试耗尽后的最后一次失败也落履历）。 */
+    public static final String STATUS_FAILED = "FAILED";
+
     private String pipelineName;
     private String mode;
+    private String status = STATUS_SUCCESS;
     private long startedAt;
     private long finishedAt;
     private long recordsRead;
@@ -45,6 +51,14 @@ public class PipelineRunResult {
 
     public void setMode(String mode) {
         this.mode = mode;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public long getStartedAt() {

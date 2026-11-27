@@ -124,3 +124,19 @@ h3.zetl-sec { font-size: 13px; margin: 14px 0 8px; color: var(--zetl-acc) }
     .zetl-ed-shell { flex-direction: column }
     .zetl-ed-palette, .zetl-ed-cfg { width: 100%; max-height: 200px }
 }
+
+/* 运行总览统计卡（046） */
+.zetl-stat { flex: 1 1 150px; min-width: 140px; margin-bottom: 10px; padding: 12px 16px }
+.zetl-stat-label { font-size: 11px; color: var(--zetl-dim); letter-spacing: .05em }
+.zetl-stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums }
+
+/* 数据源管理表单（046） */
+.zetl-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; margin-bottom: 4px }
+.zetl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--zetl-dim) }
+.zetl-field input { width: 100%; background: var(--zetl-panel); color: var(--zetl-fg); border: 1px solid #d9d9d9; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit }
+.zetl-field input:focus { outline: none; border-color: var(--zetl-acc) }
+.zetl-field input:disabled { background: var(--zetl-panel2); color: var(--zetl-dim) }
+
+@media (max-width: 720px) {
+    .zetl-form-grid { grid-template-columns: 1fr }
+}

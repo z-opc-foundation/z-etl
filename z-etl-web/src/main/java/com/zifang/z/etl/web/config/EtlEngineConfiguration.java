@@ -111,7 +111,30 @@ public class EtlEngineConfiguration {
     }
 
     /**
-     * 数据源解析 SPI：z-dms 未接入时的占位实现（明确报错，不静默降级）。
+     * 数据源登记仓储（落 {@code etl_datasource} ⇒ 数据源管理页 + Provider 解析共用）。
+     */
+    @Bean
+    public com.zifang.z.etl.core.engine.JdbcDataSourceRegistry etlDataSourceRegistry(
+            @Qualifier("dataSourceEtl") DataSource dataSourceEtl) throws Exception {
+        EtlSchema.ensure(dataSourceEtl);
+        return new com.zifang.z.etl.core.engine.JdbcDataSourceRegistry(dataSourceEtl);
+    }
+
+    /**
+     * 数据源解析 SPI：默认走数据源登记表（{@code etl_datasource}）。
+     *
+     * <p>宿主接入 z-dms 后由宿主声明自己的 {@link DataSourceProvider} Bean 顶掉，
+     * 本模块不需要改。声明顺序在占位实现之前 ⇒ 占位实现只在宿主与本 Bean 都缺位时生效。
+     */
+    @Bean
+    @ConditionalOnMissingBean(DataSourceProvider.class)
+    public DataSourceProvider etlRegistryDataSourceProvider(
+            com.zifang.z.etl.core.engine.JdbcDataSourceRegistry etlDataSourceRegistry) {
+        return new RegistryDataSourceProvider(etlDataSourceRegistry);
+    }
+
+    /**
+     * 数据源解析 SPI 兜底：登记表与宿主实现都缺位时明确报错，不静默降级。
      */
     @Bean
     @ConditionalOnMissingBean(DataSourceProvider.class)

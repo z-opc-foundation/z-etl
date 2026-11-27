@@ -424,6 +424,7 @@ public class PipelineExecutor {
             if (operatorCapture != null) {
                 operatorCapture.putAll(operators);
             }
+            result.setFinishedAt(System.currentTimeMillis());
             return result;
         } finally {
             for (int i = closables.size() - 1; i >= 0; i--) {

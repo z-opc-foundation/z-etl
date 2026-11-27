@@ -81,6 +81,17 @@ public class EtlPipelineController {
     }
 
     /**
+     * 运行总览（窗口计数 + 每流水线最近一次运行 + 调度登记）。
+     */
+    @GetMapping("/overview")
+    @BizApi(summary = "运行总览", description = "近 24h/7d 成功失败计数 + 每条流水线最近一次运行 + 调度登记。", tags = {"z-etl"})
+    public Map<String, Object> overview(@RequestParam(value = "recent", defaultValue = "20")
+                                        @BizParam(name = "recent", type = BizField.FieldType.INTEGER,
+                                        description = "最近运行明细条数", position = BizParam.Position.QUERY) int recent) {
+        return service.overview(recent);
+    }
+
+    /**
      * 流水线定义。
      */
     @GetMapping("/{name}")

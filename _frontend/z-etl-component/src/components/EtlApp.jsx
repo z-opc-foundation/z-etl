@@ -1,24 +1,27 @@
 /**
- * z-etl 工作台（独立形态：左树 + 五视图 + hash 路由）。
+ * z-etl 工作台（独立形态：左树 + 七视图 + hash 路由）。
  *
- * 嵌主壳时不要用这个组件——按视图单独挂 SourcesView / SinksView / TemplatesView /
- * SchedulesView / JobsView（壳的菜单已承担左树职责）；EtlApp 供独立页面 / suit 冒烟用。
+ * 嵌主壳时不要用这个组件——按视图单独挂 DataSourcesView / SourcesView / SinksView /
+ * TemplatesView / SchedulesView / JobsView / OverviewView（壳的菜单已承担左树职责）；
+ * EtlApp 供独立页面 / suit 冒烟用。
  *
  * props:
- *   view        受控视图键（templates/job/sched/sources/sinks，复数别名归一）；
+ *   view        受控视图键（datasources/overview/templates/job/sched/sources/sinks，复数别名归一）；
  *               缺省 = 内部状态 + location.hash 路由（独立形态）
- *   defaultView 初始视图（默认 templates）
+ *   defaultView 初始视图（默认 overview）
  */
 import {useEffect, useMemo, useState} from 'react'
 import {apiGet} from '../services/api.js'
 import {useToast} from './useToast.jsx'
 import {SourcesView, SinksView} from './CatalogView.jsx'
+import DataSourcesView from './DataSourcesView.jsx'
+import OverviewView from './OverviewView.jsx'
 import TemplatesView from './TemplatesView.jsx'
 import SchedulesView from './SchedulesView.jsx'
 import JobsView from './JobsView.jsx'
 
-const TABS = ['sources', 'sinks', 'templates', 'sched', 'job']
-const TAB_ALIAS = {schedules: 'sched', jobs: 'job'}
+const TABS = ['datasources', 'overview', 'sources', 'sinks', 'templates', 'sched', 'job']
+const TAB_ALIAS = {schedules: 'sched', jobs: 'job', datasource: 'datasources'}
 const normTab = (t) => TAB_ALIAS[t] || t
 
 const ICONS = {
@@ -43,6 +46,12 @@ const ICONS = {
     sinks: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     ),
+    datasources: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+    ),
+    overview: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    ),
     collapse: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
     ),
@@ -62,7 +71,7 @@ export default function EtlApp({view, defaultView, style}) {
     const [innerView, setInnerView] = useState(normTab(defaultView || 'templates'))
     const current = normTab(controlled ? view : innerView)
     const [operators, setOperators] = useState([])
-    const [counts, setCounts] = useState({templates: 0, job: 0, sched: 0, sources: 0, sinks: 0})
+    const [counts, setCounts] = useState({templates: 0, job: 0, sched: 0, sources: 0, sinks: 0, datasources: 0})
     const [pipeline, setPipeline] = useState(null)
     const [job, setJob] = useState(null)
     const [collapsed, setCollapsed] = useState(readCollapsedGroups)
@@ -117,6 +126,13 @@ export default function EtlApp({view, defaultView, style}) {
     const itemCount = (n) => (n > 0 ? String(n) : '')
 
     const views = useMemo(() => ({
+        datasources: (
+            <DataSourcesView
+                notify={notify}
+                onCount={(n) => setCounts((c) => ({...c, datasources: n}))}
+            />
+        ),
+        overview: <OverviewView/>,
         sources: <SourcesView/>,
         sinks: <SinksView/>,
         templates: (
@@ -152,6 +168,7 @@ export default function EtlApp({view, defaultView, style}) {
         </div>
     )
 
+    const dsActive = current === 'datasources'
     const jobsMgmtActive = ['templates', 'job', 'sched'].indexOf(current) >= 0
     const opsActive = ['sources', 'sinks'].indexOf(current) >= 0
 
@@ -166,6 +183,16 @@ export default function EtlApp({view, defaultView, style}) {
                     </div>
                 </div>
                 <nav className="zetl-nav">
+                    <div className={'zetl-nav-group' + (dsActive ? ' has-active' : '') + (collapsed.datasources ? ' collapsed' : '')}>
+                        <button type="button" className="zetl-nav-group-toggle" onClick={(ev) => { ev.stopPropagation(); toggleGroup('datasources') }}>
+                            <span>数据接入</span>
+                            <span className="zetl-nav-group-active"/>
+                            <span className="zetl-nav-group-chevron">{ICONS.chevron}</span>
+                        </button>
+                        <div className="zetl-nav-items">
+                            {navItem('datasources', '数据源管理', ICONS.datasources, 'datasources')}
+                        </div>
+                    </div>
                     <div className={'zetl-nav-group' + (jobsMgmtActive ? ' has-active' : '') + (collapsed['jobs-mgmt'] ? ' collapsed' : '')}>
                         <button type="button" className="zetl-nav-group-toggle" onClick={(ev) => { ev.stopPropagation(); toggleGroup('jobs-mgmt') }}>
                             <span>作业管理</span>
@@ -190,8 +217,18 @@ export default function EtlApp({view, defaultView, style}) {
                             {navItem('sched', '调度', ICONS.sched, 'sched')}
                         </div>
                     </div>
-                    <div className={'zetl-nav-group' + (opsActive ? ' has-active' : '') + (collapsed.ops ? ' collapsed' : '')}>
+                    <div className={'zetl-nav-group' + (current === 'overview' ? ' has-active' : '') + (collapsed.ops ? ' collapsed' : '')}>
                         <button type="button" className="zetl-nav-group-toggle" onClick={(ev) => { ev.stopPropagation(); toggleGroup('ops') }}>
+                            <span>运维治理</span>
+                            <span className="zetl-nav-group-active"/>
+                            <span className="zetl-nav-group-chevron">{ICONS.chevron}</span>
+                        </button>
+                        <div className="zetl-nav-items">
+                            {navItem('overview', '运行总览', ICONS.overview)}
+                        </div>
+                    </div>
+                    <div className={'zetl-nav-group' + (opsActive ? ' has-active' : '') + (collapsed['ops-catalog'] ? ' collapsed' : '')}>
+                        <button type="button" className="zetl-nav-group-toggle" onClick={(ev) => { ev.stopPropagation(); toggleGroup('ops-catalog') }}>
                             <span>算子库</span>
                             <span className="zetl-nav-group-active"/>
                             <span className="zetl-nav-group-chevron">{ICONS.chevron}</span>

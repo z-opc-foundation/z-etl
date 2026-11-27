@@ -77,6 +77,12 @@
   button.act:hover{border-color:var(--acc);color:var(--acc)}
   button.act.primary{background:var(--acc);border-color:var(--acc);color:#fff}
   .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .ds-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px;margin-bottom:4px}
+  .ds-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+  .ds-field input{width:100%;background:var(--panel);color:var(--fg);border:1px solid #d9d9d9;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit}
+  .ds-field input:focus{outline:none;border-color:var(--acc)}
+  .ds-field input:disabled{background:var(--panel2);color:var(--dim)}
+  @media (max-width:720px){.ds-grid{grid-template-columns:1fr}}
   table{border-collapse:collapse;width:100%;font-size:12px}
   th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
   th{background:var(--panel2);color:var(--dim);font-weight:600}
@@ -131,6 +137,21 @@
     </div>
   </div>
   <nav class="nav" id="menu">
+    <!-- 组：数据接入（数据源登记：流水线 dataSourceRef 按名引用） -->
+    <div class="nav-group" data-key="datasources">
+      <button type="button" class="nav-group-toggle" onclick="toggleGroup(event,this)">
+        <span>数据接入</span>
+        <span class="nav-group-active"></span>
+        <span class="nav-group-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="nav-items">
+        <div class="nav-item" data-tab="ds" onclick="setTab('ds')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          <span class="nav-text">数据源管理</span>
+          <span class="nav-badge" id="cnt-ds"></span>
+        </div>
+      </div>
+    </div>
     <!-- 组：作业管理（模板 = 管道定义；实例 = 登记的作业；调度同门） -->
     <div class="nav-group open" data-tab="templates" data-key="jobs-mgmt">
       <button type="button" class="nav-group-toggle" onclick="toggleGroup(event,this)">
@@ -155,6 +176,20 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span class="nav-text">调度</span>
           <span class="nav-badge" id="cnt-sched"></span>
+        </div>
+      </div>
+    </div>
+    <!-- 组：运维治理（运行总览） -->
+    <div class="nav-group" data-key="ops-gov">
+      <button type="button" class="nav-group-toggle" onclick="toggleGroup(event,this)">
+        <span>运维治理</span>
+        <span class="nav-group-active"></span>
+        <span class="nav-group-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="nav-items">
+        <div class="nav-item" data-tab="overview" onclick="setTab('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          <span class="nav-text">运行总览</span>
         </div>
       </div>
     </div>
@@ -187,6 +222,41 @@
   </div>
 </aside>
 <main>
+  <!-- ============ 数据源管理（046）============ -->
+  <section id="tab-ds" class="hidden">
+    <div class="panel">
+      <h2 id="ds-form-title">登记数据源 <span class="badge">dataSourceRef 按名引用</span></h2>
+      <div class="ds-grid">
+        <label class="ds-field"><span>名称</span><input id="ds-name" type="text" placeholder="ds-oc-main（流水线里 dataSourceRef 用这个名字）"/></label>
+        <label class="ds-field"><span>类型</span><input id="ds-type" type="text" value="jdbc"/></label>
+        <label class="ds-field" style="grid-column:1/-1"><span>JDBC url</span><input id="ds-url" type="text" placeholder="jdbc:mysql://host:3306/db"/></label>
+        <label class="ds-field"><span>用户名</span><input id="ds-username" type="text"/></label>
+        <label class="ds-field"><span>密码</span><input id="ds-password" type="password" placeholder="只落库，接口不出网"/></label>
+        <label class="ds-field" style="grid-column:1/-1"><span>备注</span><input id="ds-desc" type="text"/></label>
+      </div>
+      <div class="row">
+        <button class="act primary" id="ds-save-btn" onclick="saveDatasource()">登记</button>
+        <button class="act" onclick="testDatasourceForm()">测试连接</button>
+        <button class="act hidden" id="ds-cancel-btn" onclick="resetDatasourceForm()">取消编辑，改新增</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>已登记数据源 <span class="badge" id="ds-count">0</span></h2>
+      <div id="ds-body">加载中…</div>
+    </div>
+  </section>
+  <!-- ============ 运行总览（046）============ -->
+  <section id="tab-overview" class="hidden">
+    <div class="row" style="align-items:stretch;gap:10px;margin-bottom:4px" id="ov-stats"></div>
+    <div class="panel">
+      <h2>流水线健康 <span class="badge">最近一次运行</span></h2>
+      <div id="ov-pipelines">加载中…</div>
+    </div>
+    <div class="panel">
+      <h2>最近运行 <span class="badge">跨流水线 · 含失败</span></h2>
+      <div id="ov-recent"></div>
+    </div>
+  </section>
   <!-- ============ 数据源 ============ -->
   <section id="tab-sources" class="hidden">
     <div class="panel">
@@ -335,6 +405,187 @@ async function api(method, path, body, raw) {
 }
 
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+/* ---------- 数据源管理（046）---------- */
+const DS_PASSWORD_MASK = '********';
+let DS_EDITING = false;
+
+async function renderDataSources() {
+  try {
+    const data = await api('GET', '/api/etl/datasources');
+    const rows = data.datasources || [];
+    setCount('cnt-ds', rows.length);
+    $('ds-count').textContent = String(rows.length);
+    const body = rows.length === 0
+        ? '<p style="color:var(--dim)">还没有登记数据源——上方填好后点「登记」。</p>'
+        : '<table><thead><tr><th>名称</th><th>类型</th><th>url</th><th>用户名</th><th>密码</th><th>备注</th><th>操作</th></tr></thead><tbody>'
+          + rows.map(r =>
+              '<tr><td><code>' + esc(r.name) + '</code></td>'
+              + '<td>' + esc(r.type || '') + '</td>'
+              + '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis" title="' + esc(r.url || '') + '">' + esc(r.url || '') + '</td>'
+              + '<td>' + esc(r.username || '—') + '</td>'
+              + '<td>' + (r.password ? '<span class="badge">已存</span>' : '<span style="color:var(--dim)">未存</span>') + '</td>'
+              + '<td style="color:var(--dim)">' + esc(r.description || '—') + '</td>'
+              + '<td><div class="row" style="gap:6px;margin:0">'
+              + '<button class="act" onclick="testDatasourceRow(\'' + esc(r.name) + '\')">测试连接</button>'
+              + '<button class="act" onclick="editDatasource(\'' + esc(r.name) + '\')">编辑</button>'
+              + '<button class="act" style="color:var(--err)" onclick="removeDatasource(\'' + esc(r.name) + '\')">删除</button>'
+              + '</div></td></tr>').join('')
+          + '</tbody></table>';
+    $('ds-body').innerHTML = body;
+  } catch (e) {
+    $('ds-body').innerHTML = '<p style="color:var(--err)">数据源列表加载失败：' + esc(e.message) + '</p>';
+  }
+}
+
+function dsFormBody() {
+  const password = $('ds-password').value;
+  return {
+    name: $('ds-name').value.trim(),
+    type: $('ds-type').value.trim() || 'jdbc',
+    url: $('ds-url').value.trim(),
+    username: $('ds-username').value.trim(),
+    password: password,
+    description: $('ds-desc').value.trim(),
+  };
+}
+
+async function saveDatasource() {
+  const body = dsFormBody();
+  if (!body.name) { toast('数据源名不能为空', false); return; }
+  if (!body.url) { toast('JDBC url 不能为空', false); return; }
+  try {
+    await api('POST', '/api/etl/datasources', body);
+    toast((DS_EDITING ? '已更新：' : '已登记：') + body.name, true);
+    resetDatasourceForm();
+    renderDataSources();
+  } catch (e) { toast(e.message, false); }
+}
+
+async function testDatasourceForm() {
+  const body = dsFormBody();
+  if (!body.name || !body.url) { toast('先填数据源名和 url', false); return; }
+  try {
+    const r = await api('POST', '/api/etl/datasources/test', body);
+    toast(r.message, r.ok === true);
+  } catch (e) { toast(e.message, false); }
+}
+
+async function testDatasourceRow(name) {
+  try {
+    // 行级测试：password 不回传（留空），后端对已登记条目用库存真值
+    const row = {name: name, url: '', username: '', password: ''};
+    const all = await api('GET', '/api/etl/datasources');
+    const found = (all.datasources || []).find(d => d.name === name);
+    if (found) { row.url = found.url; row.username = found.username; }
+    const r = await api('POST', '/api/etl/datasources/test', row);
+    toast(name + '：' + r.message, r.ok === true);
+  } catch (e) { toast(e.message, false); }
+}
+
+async function editDatasource(name) {
+  try {
+    const all = await api('GET', '/api/etl/datasources');
+    const row = (all.datasources || []).find(d => d.name === name);
+    if (!row) { toast('数据源不存在：' + name, false); return; }
+    DS_EDITING = true;
+    $('ds-name').value = row.name; $('ds-name').disabled = true;
+    $('ds-type').value = row.type || 'jdbc';
+    $('ds-url').value = row.url || '';
+    $('ds-username').value = row.username || '';
+    $('ds-password').value = '';
+    $('ds-password').placeholder = '留空 = 保留旧密码';
+    $('ds-desc').value = row.description || '';
+    $('ds-form-title').firstChild.textContent = '编辑数据源 ';
+    $('ds-save-btn').textContent = '保存修改';
+    $('ds-cancel-btn').classList.remove('hidden');
+  } catch (e) { toast(e.message, false); }
+}
+
+function resetDatasourceForm() {
+  DS_EDITING = false;
+  $('ds-name').value = ''; $('ds-name').disabled = false;
+  $('ds-type').value = 'jdbc'; $('ds-url').value = ''; $('ds-username').value = '';
+  $('ds-password').value = ''; $('ds-password').placeholder = '只落库，接口不出网';
+  $('ds-desc').value = '';
+  $('ds-form-title').firstChild.textContent = '登记数据源 ';
+  $('ds-save-btn').textContent = '登记';
+  $('ds-cancel-btn').classList.add('hidden');
+}
+
+async function removeDatasource(name) {
+  if (!window.confirm('删除数据源 ' + name + '？引用它的流水线运行时会报「数据源未登记」。')) return;
+  try {
+    await api('DELETE', '/api/etl/datasources/' + encodeURIComponent(name));
+    toast('已删除：' + name, true);
+    renderDataSources();
+  } catch (e) { toast(e.message, false); }
+}
+
+/* ---------- 运行总览（046）---------- */
+function fmtMs(ms) {
+  if (ms == null || ms < 0) return '—';
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
+}
+
+function statusChip(status) {
+  if (!status) return '<span class="badge">未运行</span>';
+  const failed = status === 'FAILED';
+  const style = failed ? 'color:var(--err);border-color:var(--err);background:rgba(255,77,79,.08)'
+      : 'color:var(--ok);border-color:var(--ok);background:rgba(82,196,26,.08)';
+  return '<span class="badge" style="' + style + '">' + (failed ? '失败' : '成功') + '</span>';
+}
+
+function statCard(label, value, tone) {
+  return '<div class="panel stat" style="flex:1 1 150px;min-width:140px;margin-bottom:10px;padding:12px 16px">'
+      + '<div style="font-size:11px;color:var(--dim);letter-spacing:.05em">' + esc(label) + '</div>'
+      + '<div style="font-size:22px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;'
+      + (tone ? 'color:' + tone : '') + '">' + value + '</div></div>';
+}
+
+async function renderOverview() {
+  $('ov-stats').innerHTML = '<div class="panel" style="flex:1;min-width:140px"><p style="color:var(--dim)">加载中…</p></div>';
+  $('ov-pipelines').innerHTML = '<p style="color:var(--dim)">加载中…</p>';
+  $('ov-recent').innerHTML = '';
+  let d;
+  try {
+    d = await api('GET', '/api/etl/pipelines/overview?recent=50');
+  } catch (e) {
+    $('ov-stats').innerHTML = '<div class="panel" style="flex:1"><p style="color:var(--err)">总览加载失败：' + esc(e.message) + '</p></div>';
+    return;
+  }
+  const h24 = d.h24 || {}, d7 = d.d7 || {}, pipelines = d.pipelines || [], recent = d.recentRuns || [];
+  const failedIn24 = h24.failed || 0;
+  $('ov-stats').innerHTML =
+      statCard('流水线总数', pipelines.length)
+      + statCard('近 24h 成功', h24.success || 0, 'var(--ok)')
+      + statCard('近 24h 失败', failedIn24, failedIn24 > 0 ? 'var(--err)' : null)
+      + statCard('近 7d 成功 / 失败', (d7.success || 0) + ' / ' + (d7.failed || 0));
+  $('ov-pipelines').innerHTML = pipelines.length === 0
+      ? '<p style="color:var(--dim)">还没有流水线——先到「作业模板」登记一条。</p>'
+      : '<table><thead><tr><th>流水线</th><th>最近状态</th><th>上次开始</th><th>耗时</th><th>读 / 写</th><th>调度</th></tr></thead><tbody>'
+        + pipelines.map(p =>
+            '<tr><td><code>' + esc(p.name) + '</code></td><td>' + statusChip(p.lastStatus) + '</td>'
+            + '<td>' + (p.lastStartedAt ? fmtTime(p.lastStartedAt) : '—') + '</td>'
+            + '<td>' + fmtMs(p.lastDurationMs) + '</td>'
+            + '<td>' + (p.lastRecordsRead == null ? '—' : p.lastRecordsRead) + ' / ' + (p.lastRecordsWritten == null ? '—' : p.lastRecordsWritten) + '</td>'
+            + '<td>' + (p.schedule
+                ? esc(p.schedule.cronExpression) + (p.schedule.enabled === false ? ' <span class="badge">停用</span>' : '')
+                  + (p.schedule.nextFireTime ? ' <span style="color:var(--dim)">下次 ' + fmtTime(p.schedule.nextFireTime) + '</span>' : '')
+                : '<span style="color:var(--dim)">未登记</span>') + '</td></tr>').join('')
+        + '</tbody></table>';
+  $('ov-recent').innerHTML = recent.length === 0
+      ? '<p style="color:var(--dim)">还没有运行记录。</p>'
+      : '<table><thead><tr><th>时间</th><th>流水线</th><th>状态</th><th>模式</th><th>耗时</th><th>读 / 写</th><th>备注</th></tr></thead><tbody>'
+        + recent.map(r =>
+            '<tr><td>' + fmtTime(r.startedAt) + '</td><td><code>' + esc(r.pipeline) + '</code></td>'
+            + '<td>' + statusChip(r.status) + '</td><td>' + esc(r.mode || '—') + '</td>'
+            + '<td>' + fmtMs(r.durationMs) + '</td>'
+            + '<td>' + (r.recordsRead == null ? '—' : r.recordsRead) + ' / ' + (r.recordsWritten == null ? '—' : r.recordsWritten) + '</td>'
+            + '<td style="color:' + (r.status === 'FAILED' ? 'var(--err)' : 'var(--dim)') + ';max-width:420px">'
+            + esc((r.notes || []).join('；') || '—') + '</td></tr>').join('')
+        + '</tbody></table>';
+}
 function jsonBlock(v) { return '<pre>' + esc(typeof v === 'string' ? v : JSON.stringify(v, null, 2)) + '</pre>'; }
 function fmtTime(ts) {
   if (ts == null || ts === '') return '—';
@@ -371,10 +622,10 @@ function renderRunResult(r) {
   return head + '<h3 class="sec">节点指标</h3>' + table;
 }
 /* ---------- 左侧树菜单 + hash 路由 ---------- */
-const TABS = ['sources', 'sinks', 'templates', 'sched', 'job'];
+const TABS = ['ds', 'overview', 'sources', 'sinks', 'templates', 'sched', 'job'];
 /* hash 别名：主壳菜单路由用复数（/etl/schedules、/etl/jobs ⇒ iframe #schedules/#jobs），
    控制台 tab id 是单数（tab-sched/tab-job）⇒ 入站 hash 统一归一到内部键。 */
-const TAB_ALIAS = { schedules: 'sched', jobs: 'job' };
+const TAB_ALIAS = { schedules: 'sched', jobs: 'job', datasource: 'ds', datasources: 'ds' };
 function normTab(t) { return TAB_ALIAS[t] || t; }
 function setTab(tab, skipHash) {
   tab = normTab(tab);
@@ -385,6 +636,8 @@ function setTab(tab, skipHash) {
   });
   TABS.forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
   if (!skipHash) history.replaceState(null, '', '#' + tab);
+  if (tab === 'ds') renderDataSources();
+  if (tab === 'overview') renderOverview();
   if (tab === 'sources') renderCatalog('SOURCE', 'src-body');
   if (tab === 'sinks') renderCatalog('SINK', 'snk-body');
   if (tab === 'templates') showTemplateList();

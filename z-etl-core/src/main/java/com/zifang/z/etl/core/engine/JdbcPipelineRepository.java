@@ -9,6 +9,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -126,20 +127,21 @@ public class JdbcPipelineRepository implements PipelineRepository {
         try {
             connection = dataSource.getConnection();
             statement = connection.prepareStatement("INSERT INTO " + EtlSchema.TABLE_PIPELINE_RUN
-                    + " (run_id, pipeline_name, mode, records_read, records_written,"
+                    + " (run_id, pipeline_name, mode, status, records_read, records_written,"
                     + " watermark_before, watermark_after, restored, notes, started_at, finished_at)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             statement.setString(1, UUID.randomUUID().toString());
             statement.setString(2, result.getPipelineName());
             statement.setString(3, result.getMode());
-            statement.setLong(4, result.getRecordsRead());
-            statement.setLong(5, result.getRecordsWritten());
-            statement.setString(6, result.getWatermarkBefore());
-            statement.setString(7, result.getWatermarkAfter());
-            statement.setInt(8, result.isRestored() ? 1 : 0);
-            statement.setString(9, String.join("；", result.getNotes()));
-            statement.setLong(10, result.getStartedAt());
-            statement.setLong(11, result.getFinishedAt());
+            statement.setString(4, result.getStatus() == null ? PipelineRunResult.STATUS_SUCCESS : result.getStatus());
+            statement.setLong(5, result.getRecordsRead());
+            statement.setLong(6, result.getRecordsWritten());
+            statement.setString(7, result.getWatermarkBefore());
+            statement.setString(8, result.getWatermarkAfter());
+            statement.setInt(9, result.isRestored() ? 1 : 0);
+            statement.setString(10, String.join("；", result.getNotes()));
+            statement.setLong(11, result.getStartedAt());
+            statement.setLong(12, result.getFinishedAt());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("流水线运行履历落库失败: " + e.getMessage(), e);
@@ -157,7 +159,7 @@ public class JdbcPipelineRepository implements PipelineRepository {
         ResultSet rs = null;
         try {
             connection = dataSource.getConnection();
-            String sql = "SELECT pipeline_name, mode, records_read, records_written,"
+            String sql = "SELECT pipeline_name, mode, status, records_read, records_written,"
                     + " watermark_before, watermark_after, restored, notes, started_at, finished_at"
                     + " FROM " + EtlSchema.TABLE_PIPELINE_RUN + " WHERE pipeline_name = ?"
                     + " ORDER BY started_at DESC";
@@ -169,23 +171,7 @@ public class JdbcPipelineRepository implements PipelineRepository {
             statement.setString(1, name);
             rs = statement.executeQuery();
             while (rs.next()) {
-                PipelineRunResult result = new PipelineRunResult();
-                result.setPipelineName(rs.getString(1));
-                result.setMode(rs.getString(2));
-                result.setRecordsRead(rs.getLong(3));
-                result.setRecordsWritten(rs.getLong(4));
-                result.setWatermarkBefore(rs.getString(5));
-                result.setWatermarkAfter(rs.getString(6));
-                result.setRestored(rs.getInt(7) == 1);
-                String notes = rs.getString(8);
-                if (notes != null && !notes.isEmpty()) {
-                    for (String note : notes.split("；")) {
-                        result.addNote(note);
-                    }
-                }
-                result.setStartedAt(rs.getLong(9));
-                result.setFinishedAt(rs.getLong(10));
-                history.add(result);
+                history.add(mapRunRow(rs));
             }
             return history;
         } catch (SQLException e) {
@@ -194,6 +180,82 @@ public class JdbcPipelineRepository implements PipelineRepository {
             close(rs);
             close(statement);
             close(connection);
+        }
+    }
+
+    @Override
+    public List<PipelineRunResult> recentRuns(int limit) {
+        List<PipelineRunResult> runs = new ArrayList<PipelineRunResult>();
+        Connection connection = null;
+        PreparedStatement statement = null;
+        ResultSet rs = null;
+        try {
+            connection = dataSource.getConnection();
+            String sql = "SELECT pipeline_name, mode, status, records_read, records_written,"
+                    + " watermark_before, watermark_after, restored, notes, started_at, finished_at"
+                    + " FROM " + EtlSchema.TABLE_PIPELINE_RUN + " ORDER BY started_at DESC";
+            if (limit > 0) {
+                sql += " LIMIT " + Math.abs(limit);
+            }
+            statement = connection.prepareStatement(sql);
+            rs = statement.executeQuery();
+            while (rs.next()) {
+                runs.add(mapRunRow(rs));
+            }
+            return runs;
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取跨流水线最近运行失败: " + e.getMessage(), e);
+        } finally {
+            close(rs, statement, connection);
+        }
+    }
+
+    /** 履历行 → 运行结果（runHistory / recentRuns 共用）。 */
+    private static PipelineRunResult mapRunRow(ResultSet rs) throws SQLException {
+        PipelineRunResult result = new PipelineRunResult();
+        result.setPipelineName(rs.getString(1));
+        result.setMode(rs.getString(2));
+        String status = rs.getString(3);
+        result.setStatus(status == null || status.isEmpty()
+                ? PipelineRunResult.STATUS_SUCCESS : status);
+        result.setRecordsRead(rs.getLong(4));
+        result.setRecordsWritten(rs.getLong(5));
+        result.setWatermarkBefore(rs.getString(6));
+        result.setWatermarkAfter(rs.getString(7));
+        result.setRestored(rs.getInt(8) == 1);
+        String notes = rs.getString(9);
+        if (notes != null && !notes.isEmpty()) {
+            for (String note : notes.split("；")) {
+                result.addNote(note);
+            }
+        }
+        result.setStartedAt(rs.getLong(10));
+        result.setFinishedAt(rs.getLong(11));
+        return result;
+    }
+
+    /** 三件套关闭（recentRuns 用）。 */
+    private static void close(ResultSet rs, Statement statement, Connection connection) {
+        if (rs != null) {
+            try {
+                rs.close();
+            } catch (SQLException ignore) {
+                // 关闭失败不影响主流程
+            }
+        }
+        if (statement != null) {
+            try {
+                statement.close();
+            } catch (SQLException ignore) {
+                // 关闭失败不影响主流程
+            }
+        }
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException ignore) {
+                // 关闭失败不影响主流程
+            }
         }
     }
 

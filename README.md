@@ -182,6 +182,7 @@ Kafka Streams 的滚动聚合口径，Polars 的 `explain()`）。
 ```yaml
 name: order-minute-rollup
 mode: auto
+failurePolicy: fail-fast                    # fail-fast（缺省，任何算子失败即中断）/ continue（坏行计数放行不炸主循环）
 nodes:
   - id: src
     type: jdbc.source                       # 源：分页游标 + SQL 下推 + 复合水位游标（与线性作业同一套零件）
@@ -299,11 +300,12 @@ edges:
 | `sort` | 变换 | **排序**（物化整流）：按 `columns` 多列排序（前缀 `-` 降序）；数值按数值比、其余按字符串（码点）序、null 排最后；⚠️ 要收齐全流才出第一行，只适合有界数据 | `columns` |
 | `profile` | 变换 | **列画像**（Spark describe 的流式口径）：行**原样透传**不改一字，流尾按列出画像行（`column/rows/nulls/distinct/min/max/mean`，min/max 数值按数值比其余按码点序、mean 只对数值列算）走 `reportTo` 旁路（没声明只落节点指标）；`distinctCap` 封顶去重计数防高基数列撑内存 | `reportTo/distinctCap` |
 | `async.map` | 变换 | **异步映射**（Flink AsyncFunction 口径）：每行异步外呼 HTTP 补列；`capacity` 容量背压（在途满阻塞等一个）、`outputMode` ordered/unordered、流结束 flush 把在途全发出；`onError` fail/skip | `url({列}模板)/method/headers/bodyColumns/fields/timeoutMs/capacity/outputMode/onError/allowedHosts` |
+| `ai.map` | 变换 | **AI 映射**（future-etl 的 AI 步骤口径）：每行渲染提示词（`${列}` 占位符，与 `template` 同式）调大模型，输出文本落声明列；执行器经 `AiExecutor` SPI 由宿主装配（core 不依赖任何模型 SDK），未装配时节点打开即报错说明；每行同步外呼，高吞吐场景用 `async.map` 或上游分片 | `prompt/outputField/system/agentCode` |
 | `field.mapping` | 变换 | 字段映射（改名 + 落库类型） | `mappings: [{source,target,type}]` |
 | `type.normalize` | 变换 | 类型归一（链尾收口） | `rules: [{column,type,scale}]` |
 | `assert` | 变换 | **数据质量闸**：逐行判定 + 流结束结算；违规可失败 / 走旁路 / 只计数 | `mode/rejectedTo/expression/engine/inRange/allowedValues/notNullRate/unique/minRows/maxRows/exactRows` |
 | `union` | 变换 | 多路合并（不写也行，多入边天然合并） | — |
-| `explode` | 变换 | **炸行**（一行拆多行，Flink SQL 的 UNNEST 口径）：数组列逐元素出一行 / 字符串按 `delimiter` 切分；标量当单元素原样过；空数组/null 缺省丢并计数（`keepEmpty: true` 保留原行）；`target` 可把元素写新列、`indexColumn` 顺带写下标 | `column/target/indexColumn/delimiter/keepEmpty` |
+| `explode` | 变换 | **炸行**（一行拆多行，Flink SQL 的 UNNEST 口径）：数组列逐元素出一行 / 字符串按 `delimiter` 切分；标量当单元素原样过；空数组/null 缺省丢并计数（`keepEmpty: true` 保留原行）；`target` 可把元素写新列、`indexColumn` 顺带写下标；`maxFanOut` 单行炸出行数硬顶（1..10000 缺省 1000，超出报错不静默截断——一行炸垮内存的护栏） | `column/target/indexColumn/delimiter/keepEmpty/maxFanOut` |
 | `topn` | 变换 | **截断**（按键 / 全局 Top-N，Flink Rank 的保守子集；批口径：缓存到流尾才排序产出，适合文件/有限流）：数值列按数值比、其余按字符串比、null 视为最小；同值稳定；产出行原样 | `orderBy/order/limit/keyBy` |
 | `limit` | 变换 | **截取**（SQL LIMIT 口径）：前 N 条放行、后面直接丢（`truncated` 计数）；`offset` 先跳过再截；与 topn 的分工：topn 是排序+截断（要收齐全流），limit 是**边流边截**不整流 | `limit/offset` |
 | `sample` | 变换 | **采样**（按比例放行，丢数据口径）：`seed` 声明后随机采样可复现；`hashBy` 按键哈希采样同键永远同判定（同一键的行要么全留要么全丢）且天然可复现；行原样放行只计数 | `rate/seed/hashBy` |

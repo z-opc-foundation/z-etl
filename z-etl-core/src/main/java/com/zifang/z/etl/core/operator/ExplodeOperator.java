@@ -29,6 +29,7 @@ import java.util.Map;
  *     indexColumn: tag_idx  # 可选：顺带写出元素下标（0 起）
  *     delimiter: ","        # 可选：声明后按字符串切分（数组列不受影响）
  *     keepEmpty: false      # 可选：空数组 / null / 空串是否保留原行（缺省丢并计数）
+ *     maxFanOut: 1000       # 可选：单行炸出行数硬顶（1..10000，缺省 1000；超出报错不静默截断）
  * </pre>
  *
  * <p>口径：
@@ -52,6 +53,9 @@ public class ExplodeOperator implements Operator {
     private String delimiter;
     private boolean keepEmpty;
 
+    /** 单行 fan-out 上限（future-etl 口径：单条输入的分支展开有硬顶，防一行炸垮内存）。 */
+    private int maxFanOut;
+
     private OperatorContext context;
 
     public ExplodeOperator(PipelineNode node) {
@@ -70,6 +74,11 @@ public class ExplodeOperator implements Operator {
         indexColumn = MapOperator.text(node.string("indexColumn"));
         delimiter = node.string("delimiter");
         keepEmpty = Boolean.parseBoolean(String.valueOf(node.string("keepEmpty", "false")));
+        maxFanOut = Integer.parseInt(node.string("maxFanOut", "1000"));
+        if (maxFanOut < 1 || maxFanOut > 10000) {
+            throw new IllegalArgumentException("explode 节点 " + node.getId()
+                    + " 的 maxFanOut 须在 1..10000，声明了: " + maxFanOut);
+        }
     }
 
     @Override
@@ -86,6 +95,10 @@ public class ExplodeOperator implements Operator {
                 context.count("dropped-empty");
             }
             return;
+        }
+        if (elements.size() > maxFanOut) {
+            throw new IllegalStateException("explode 节点 " + node.getId() + " 单行炸出 " + elements.size()
+                    + " 行，超过 maxFanOut=" + maxFanOut + "（一行炸垮内存的护栏，声明里先过滤或分片）");
         }
         for (int i = 0; i < elements.size(); i++) {
             Map<String, Object> row = new LinkedHashMap<String, Object>(record.row());

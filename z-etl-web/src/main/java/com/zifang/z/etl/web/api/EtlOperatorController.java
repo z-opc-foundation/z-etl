@@ -45,6 +45,7 @@ public class EtlOperatorController {
         DESC.put("script", "自由脚本：z-script 沙箱，可产出一列或整行");
         DESC.put("script.remote", "平台脚本：调 z-script 脚本中心已上线脚本（app + AK）");
         DESC.put("async.map", "异步映射：每行异步外呼 HTTP 补列，容量背压（Flink AsyncFunction 口径）");
+        DESC.put("ai.map", "AI 映射：每行渲染提示词调大模型补列（执行器宿主装配，AiExecutor SPI）");
         DESC.put("field.mapping", "字段映射：源列 → 目标列 + 落库类型");
         DESC.put("type.normalize", "类型归一：类型 + 定点小数位 + 空值策略");
         DESC.put("assert", "数据质量断言：行级判定 + 流结束结算，违规可失败/旁路/只计数");

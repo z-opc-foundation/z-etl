@@ -62,6 +62,9 @@ public class PipelineSpec {
     /** 失败重试策略（默认不重试）。 */
     private RetrySpec retry;
 
+    /** 管道级失败策略：{@code fail-fast}（缺省，任何算子失败即中断）/ {@code continue}（失败行走旁路计数，主循环不炸）。 */
+    private String failurePolicy = "fail-fast";
+
     public String getName() {
         return name;
     }
@@ -116,6 +119,14 @@ public class PipelineSpec {
 
     public void setRetry(RetrySpec retry) {
         this.retry = retry;
+    }
+
+    public String getFailurePolicy() {
+        return failurePolicy;
+    }
+
+    public void setFailurePolicy(String failurePolicy) {
+        this.failurePolicy = failurePolicy;
     }
 
     /** 按 id 取节点；取不到返回 {@code null}。 */

@@ -93,6 +93,10 @@ public class EtlEngineConfiguration {
 
     /**
      * 流水线管控引擎（登记 / 触发 / 水位 / 履历 / 计划解释）。
+     *
+     * <p>AI 执行器（{@code ai.map} 算子用）走宿主装配：宿主声明一个
+     * {@link com.zifang.z.etl.core.spi.AiExecutor} Bean（接自家模型网关）即自动接上；
+     * 没有就传 null —— {@code ai.map} 节点打开时明确报错说明，其余算子不受影响。
      */
     @Bean
     public PipelineEngine etlPipelineEngine(DataSourceProvider dataSourceProvider,
@@ -100,9 +104,10 @@ public class EtlEngineConfiguration {
                                             CheckpointStore checkpointStore,
                                             PipelineStateStore pipelineStateStore,
                                             com.zifang.z.etl.core.spi.MessageBus messageBus,
-                                            PipelineScheduleRepository scheduleRepository) {
+                                            PipelineScheduleRepository scheduleRepository,
+                                            org.springframework.beans.factory.ObjectProvider<com.zifang.z.etl.core.spi.AiExecutor> aiExecutor) {
         return new PipelineEngine(dataSourceProvider, pipelineRepository, checkpointStore, pipelineStateStore,
-                messageBus, scheduleRepository);
+                messageBus, scheduleRepository, aiExecutor.getIfAvailable());
     }
 
     /**

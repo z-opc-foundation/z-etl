@@ -14,6 +14,7 @@ import com.zifang.z.etl.core.runtime.HeapStateBackend;
 import com.zifang.z.etl.core.runtime.PipelineExecutor;
 import com.zifang.z.etl.core.runtime.PipelineRunResult;
 import com.zifang.z.etl.core.runtime.PipelineStateStore;
+import com.zifang.z.etl.core.spi.AiExecutor;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.spi.PipelineRefResolver;
@@ -41,6 +42,7 @@ public class PipelineEngine {
     private final PipelineStateStore stateStore;
     private final MessageBus messageBus;
     private final PipelineScheduleRepository scheduleRepository;
+    private final AiExecutor aiExecutor;
 
     public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
                           CheckpointStore checkpointStore, PipelineStateStore stateStore) {
@@ -71,12 +73,29 @@ public class PipelineEngine {
     public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
                           CheckpointStore checkpointStore, PipelineStateStore stateStore,
                           MessageBus messageBus, PipelineScheduleRepository scheduleRepository) {
+        this(dataSourceProvider, repository, checkpointStore, stateStore, messageBus, scheduleRepository, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析
+     * @param repository          流水线定义仓储
+     * @param checkpointStore     水位游标存储
+     * @param stateStore          状态快照存储
+     * @param messageBus          消息总线（消息类源 / 汇用；可空）
+     * @param scheduleRepository  调度登记仓储（可空 ⇒ 不提供调度登记）
+     * @param aiExecutor          AI 执行器（ai.map 用；可空 ⇒ ai.map 节点打开时报错说明）
+     */
+    public PipelineEngine(DataSourceProvider dataSourceProvider, PipelineRepository repository,
+                          CheckpointStore checkpointStore, PipelineStateStore stateStore,
+                          MessageBus messageBus, PipelineScheduleRepository scheduleRepository,
+                          AiExecutor aiExecutor) {
         this.dataSourceProvider = dataSourceProvider;
         this.repository = repository;
         this.checkpointStore = checkpointStore;
         this.stateStore = stateStore;
         this.messageBus = messageBus;
         this.scheduleRepository = scheduleRepository;
+        this.aiExecutor = aiExecutor;
     }
 
     /**
@@ -179,14 +198,14 @@ public class PipelineEngine {
         }
         PipelineSpec spec = PipelineParams.resolve(PipelineParser.copyOf(stored), params);
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
-                new ScriptSandbox(), null, null, messageBus, pipelineResolver());
+                new ScriptSandbox(), null, null, messageBus, pipelineResolver(), aiExecutor);
         return executor.dryRun(spec, sampleRows);
     }
 
     /** 跑一次（不落履历）；重试与落履历由 {@link #run(String)} 负责。 */
     private PipelineRunResult runOnce(PipelineSpec spec) throws Exception {
         PipelineExecutor executor = new PipelineExecutor(dataSourceProvider, new HeapStateBackend(),
-                new ScriptSandbox(), checkpointStore, stateStore, messageBus, pipelineResolver());
+                new ScriptSandbox(), checkpointStore, stateStore, messageBus, pipelineResolver(), aiExecutor);
         return executor.execute(spec);
     }
 

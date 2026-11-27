@@ -22,6 +22,7 @@ import com.zifang.z.etl.core.runtime.OperatorContext;
 import com.zifang.z.etl.core.runtime.Output;
 import com.zifang.z.etl.core.runtime.Record;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
+import com.zifang.z.etl.core.spi.AiExecutor;
 import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.spi.PipelineRefResolver;
 import com.zifang.z.etl.core.transform.ScriptSandbox;
@@ -77,6 +78,22 @@ public final class OperatorFactory {
      */
     public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox,
                                   MessageBus messageBus, PipelineRefResolver resolver) {
+        return create(node, provider, sandbox, messageBus, resolver, null);
+    }
+
+    /**
+     * 按节点声明建算子（带 AI 执行器）。
+     *
+     * @param node       节点声明
+     * @param provider   数据源解析（源 / 汇用）
+     * @param sandbox    脚本沙箱（filter / map / script 用）
+     * @param messageBus 消息总线（消息类源 / 汇用；可空 ⇒ 用到时报错说明）
+     * @param resolver   管道解析（pipeline.ref 源用；可空 ⇒ 引用节点打开时报错说明）
+     * @param aiExecutor AI 执行器（ai.map 用；可空 ⇒ ai.map 节点打开时报错说明）
+     * @return 算子实例
+     */
+    public static Operator create(PipelineNode node, DataSourceProvider provider, ScriptSandbox sandbox,
+                                  MessageBus messageBus, PipelineRefResolver resolver, AiExecutor aiExecutor) {
         OperatorType type = node.getOperatorType();
         if (type == null) {
             type = OperatorType.fromId(node.getType());
@@ -121,6 +138,8 @@ public final class OperatorFactory {
                 return new ScriptRemoteOperator(node);
             case ASYNC_MAP:
                 return new AsyncMapOperator(node);
+            case AI_MAP:
+                return new AiMapOperator(node, aiExecutor);
             case FIELD_MAPPING:
                 return new FieldMappingOperator(node);
             case TYPE_NORMALIZE:

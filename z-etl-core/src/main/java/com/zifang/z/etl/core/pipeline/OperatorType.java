@@ -64,6 +64,9 @@ public enum OperatorType {
     /** 异步映射（每行异步外呼 HTTP 补列；容量背压 + 有序/乱序产出；Flink AsyncFunction 口径）。 */
     ASYNC_MAP("async.map", Kind.TRANSFORM),
 
+    /** AI 映射（每行渲染提示词调大模型补列；执行器由宿主经 SPI 注入，core 零依赖）。 */
+    AI_MAP("ai.map", Kind.TRANSFORM),
+
     /** 字段映射（源列 → 目标列 + 落库类型）。 */
     FIELD_MAPPING("field.mapping", Kind.TRANSFORM),
 
@@ -372,6 +375,9 @@ public enum OperatorType {
         if ("async".equals(normalized) || "async.http".equals(normalized)
                 || "http.async".equals(normalized) || "http.lookup".equals(normalized)) {
             return ASYNC_MAP;
+        }
+        if ("ai".equals(normalized) || "llm".equals(normalized) || "ai.enrich".equals(normalized)) {
+            return AI_MAP;
         }
         // 输出类型别名
         if ("csv.sink".equals(normalized) || "file.csv.out".equals(normalized)) {

@@ -11,6 +11,7 @@ import com.zifang.z.etl.core.pipeline.PipelineParser;
 import com.zifang.z.etl.core.pipeline.PipelineNode;
 import com.zifang.z.etl.core.pipeline.PipelineSpec;
 import com.zifang.z.etl.core.pipeline.PipelineValidator;
+import com.zifang.z.etl.core.spi.AiExecutor;
 import com.zifang.z.etl.core.spi.DataSourceProvider;
 import com.zifang.z.etl.core.spi.MessageBus;
 import com.zifang.z.etl.core.spi.PipelineRefResolver;
@@ -47,6 +48,13 @@ public class PipelineExecutor {
     private final PipelineStateStore stateStore;
     private final MessageBus messageBus;
     private final PipelineRefResolver resolver;
+    private final AiExecutor aiExecutor;
+
+    /** 失败策略（随本次 execute 的声明切换）：true = 坏行计数放行不炸主循环。 */
+    private boolean continueOnFailure;
+
+    /** continue 模式下最近一次派发失败摘要（拼进结果 note）。 */
+    private volatile String lastError;
 
     /** 运行期建好的图（算子 id → 算子）。 */
     private final Map<String, com.zifang.z.etl.core.runtime.Operator> operators =
@@ -114,6 +122,23 @@ public class PipelineExecutor {
                             ScriptSandbox sandbox, CheckpointStore checkpointStore,
                             PipelineStateStore stateStore, MessageBus messageBus,
                             PipelineRefResolver resolver) {
+        this(dataSourceProvider, stateBackend, sandbox, checkpointStore, stateStore, messageBus, resolver, null);
+    }
+
+    /**
+     * @param dataSourceProvider 数据源解析 SPI
+     * @param stateBackend       状态后端（键控状态放哪）
+     * @param sandbox            脚本沙箱（filter / map / script 用）
+     * @param checkpointStore    水位游标存储（断点续传用；可空）
+     * @param stateStore         状态快照存储（键控状态落库用；可空）
+     * @param messageBus         消息总线（消息类源 / 汇用；可空）
+     * @param resolver           管道解析（pipeline.ref 源用；可空 ⇒ 引用节点打开时报错说明）
+     * @param aiExecutor         AI 执行器（ai.map 用；可空 ⇒ ai.map 节点打开时报错说明）
+     */
+    public PipelineExecutor(DataSourceProvider dataSourceProvider, StateBackend stateBackend,
+                            ScriptSandbox sandbox, CheckpointStore checkpointStore,
+                            PipelineStateStore stateStore, MessageBus messageBus,
+                            PipelineRefResolver resolver, AiExecutor aiExecutor) {
         this.dataSourceProvider = dataSourceProvider;
         this.stateBackend = stateBackend;
         this.sandbox = sandbox;
@@ -121,6 +146,7 @@ public class PipelineExecutor {
         this.stateStore = stateStore;
         this.messageBus = messageBus;
         this.resolver = resolver;
+        this.aiExecutor = aiExecutor;
     }
 
     /**
@@ -192,6 +218,16 @@ public class PipelineExecutor {
         result.setMode(mode);
         result.setStartedAt(start);
         lastSeenWatermark = Long.MIN_VALUE;
+        String policy = plan.getFailurePolicy() == null ? "fail-fast" : plan.getFailurePolicy().trim().toLowerCase();
+        if (!"fail-fast".equals(policy) && !"continue".equals(policy)) {
+            throw new IllegalArgumentException("流水线 " + plan.getName()
+                    + " failurePolicy 只支持 fail-fast / continue，声明了: " + plan.getFailurePolicy());
+        }
+        continueOnFailure = "continue".equals(policy);
+        lastError = null;
+        if (continueOnFailure) {
+            result.addNote("failurePolicy=continue：算子失败行走计数旁路，不中断整条流");
+        }
 
         // —— 状态快照恢复（mode=init 例外：清掉从头跑；试跑一律不读不写）——
         if (dryRun) {
@@ -242,7 +278,7 @@ public class PipelineExecutor {
                 com.zifang.z.etl.core.runtime.Operator operator =
                         dryRun && node.getOperatorType().isSink()
                                 ? new DryRunSink(node)
-                                : OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus, resolver);
+                                : OperatorFactory.create(node, dataSourceProvider, sandbox, messageBus, resolver, aiExecutor);
                 if (operator instanceof PullSource) {
                     PullSource source = (PullSource) operator;
                     if (checkpoint != null && checkpoint.getWatermarkValue() != null) {
@@ -382,6 +418,9 @@ public class PipelineExecutor {
             } else {
                 result.addNote("从水位 " + checkpoint.getWatermarkValue() + " 接力增量");
             }
+            if (lastError != null) {
+                result.addNote("continue 模式存在失败行，最近一次：" + lastError);
+            }
             if (operatorCapture != null) {
                 operatorCapture.putAll(operators);
             }
@@ -519,7 +558,15 @@ public class PipelineExecutor {
             try {
                 downstream.processElement(record, nodeOutputs.get(to), from);
             } catch (Exception e) {
-                throw new IllegalStateException("节点 " + from + " → " + to + " 派发失败: " + e.getMessage(), e);
+                if (continueOnFailure) {
+                    // 失败策略=continue：坏行不派发给这条边，计数放行，主循环不炸
+                    if (context != null) {
+                        context.count("records-error");
+                    }
+                    lastError = from + " → " + to + ": " + e.getMessage();
+                } else {
+                    throw new IllegalStateException("节点 " + from + " → " + to + " 派发失败: " + e.getMessage(), e);
+                }
             } finally {
                 if (context != null) {
                     context.addElapsedNanos(System.nanoTime() - start);
@@ -571,8 +618,15 @@ public class PipelineExecutor {
             try {
                 target.processElement(record, nodeOutputs.get(tag.id()), nodeId);
             } catch (Exception e) {
-                throw new IllegalStateException("旁路输出 " + nodeId + " → " + tag.id()
-                        + " 派发失败: " + e.getMessage(), e);
+                if (continueOnFailure) {
+                    if (targetContext != null) {
+                        targetContext.count("records-error");
+                    }
+                    lastError = nodeId + " →(side)" + tag.id() + ": " + e.getMessage();
+                } else {
+                    throw new IllegalStateException("旁路输出 " + nodeId + " → " + tag.id()
+                            + " 派发失败: " + e.getMessage(), e);
+                }
             }
         }
     }

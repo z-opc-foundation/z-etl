@@ -77,4 +77,10 @@ public class InMemoryPipelineRepository implements PipelineRepository {
         PipelineSpec spec = find(name);
         return spec == null ? null : PipelineParser.toYaml(spec);
     }
+
+    @Override
+    public boolean delete(String name) {
+        runs.remove(name);
+        return specs.remove(name) != null;
+    }
 }

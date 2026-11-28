@@ -130,7 +130,10 @@ public class JdbcPipelineRepository implements PipelineRepository {
                     + " (run_id, pipeline_name, mode, status, records_read, records_written,"
                     + " watermark_before, watermark_after, restored, notes, started_at, finished_at)"
                     + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            statement.setString(1, UUID.randomUUID().toString());
+            String runId = result.getRunId() == null || result.getRunId().isEmpty()
+                    ? UUID.randomUUID().toString() : result.getRunId();
+            result.setRunId(runId);
+            statement.setString(1, runId);
             statement.setString(2, result.getPipelineName());
             statement.setString(3, result.getMode());
             statement.setString(4, result.getStatus() == null ? PipelineRunResult.STATUS_SUCCESS : result.getStatus());
@@ -159,7 +162,7 @@ public class JdbcPipelineRepository implements PipelineRepository {
         ResultSet rs = null;
         try {
             connection = dataSource.getConnection();
-            String sql = "SELECT pipeline_name, mode, status, records_read, records_written,"
+            String sql = "SELECT run_id, pipeline_name, mode, status, records_read, records_written,"
                     + " watermark_before, watermark_after, restored, notes, started_at, finished_at"
                     + " FROM " + EtlSchema.TABLE_PIPELINE_RUN + " WHERE pipeline_name = ?"
                     + " ORDER BY started_at DESC";
@@ -191,7 +194,7 @@ public class JdbcPipelineRepository implements PipelineRepository {
         ResultSet rs = null;
         try {
             connection = dataSource.getConnection();
-            String sql = "SELECT pipeline_name, mode, status, records_read, records_written,"
+            String sql = "SELECT run_id, pipeline_name, mode, status, records_read, records_written,"
                     + " watermark_before, watermark_after, restored, notes, started_at, finished_at"
                     + " FROM " + EtlSchema.TABLE_PIPELINE_RUN + " ORDER BY started_at DESC";
             if (limit > 0) {
@@ -210,27 +213,55 @@ public class JdbcPipelineRepository implements PipelineRepository {
         }
     }
 
+    @Override
+    public boolean delete(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return false;
+        }
+        Connection connection = null;
+        PreparedStatement deleteRun = null;
+        PreparedStatement deleteDef = null;
+        try {
+            connection = dataSource.getConnection();
+            deleteRun = connection.prepareStatement("DELETE FROM " + EtlSchema.TABLE_PIPELINE_RUN
+                    + " WHERE pipeline_name = ?");
+            deleteRun.setString(1, name);
+            deleteRun.executeUpdate();
+            deleteDef = connection.prepareStatement("DELETE FROM " + EtlSchema.TABLE_PIPELINE_DEF
+                    + " WHERE pipeline_name = ?");
+            deleteDef.setString(1, name);
+            return deleteDef.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("删除流水线失败: " + e.getMessage(), e);
+        } finally {
+            close(deleteDef);
+            close(deleteRun);
+            close(connection);
+        }
+    }
+
     /** 履历行 → 运行结果（runHistory / recentRuns 共用）。 */
     private static PipelineRunResult mapRunRow(ResultSet rs) throws SQLException {
         PipelineRunResult result = new PipelineRunResult();
-        result.setPipelineName(rs.getString(1));
-        result.setMode(rs.getString(2));
-        String status = rs.getString(3);
+        result.setRunId(rs.getString(1));
+        result.setPipelineName(rs.getString(2));
+        result.setMode(rs.getString(3));
+        String status = rs.getString(4);
         result.setStatus(status == null || status.isEmpty()
                 ? PipelineRunResult.STATUS_SUCCESS : status);
-        result.setRecordsRead(rs.getLong(4));
-        result.setRecordsWritten(rs.getLong(5));
-        result.setWatermarkBefore(rs.getString(6));
-        result.setWatermarkAfter(rs.getString(7));
-        result.setRestored(rs.getInt(8) == 1);
-        String notes = rs.getString(9);
+        result.setRecordsRead(rs.getLong(5));
+        result.setRecordsWritten(rs.getLong(6));
+        result.setWatermarkBefore(rs.getString(7));
+        result.setWatermarkAfter(rs.getString(8));
+        result.setRestored(rs.getInt(9) == 1);
+        String notes = rs.getString(10);
         if (notes != null && !notes.isEmpty()) {
             for (String note : notes.split("；")) {
                 result.addNote(note);
             }
         }
-        result.setStartedAt(rs.getLong(10));
-        result.setFinishedAt(rs.getLong(11));
+        result.setStartedAt(rs.getLong(11));
+        result.setFinishedAt(rs.getLong(12));
         return result;
     }
 

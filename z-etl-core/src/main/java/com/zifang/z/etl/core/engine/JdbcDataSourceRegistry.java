@@ -37,7 +37,7 @@ public class JdbcDataSourceRegistry {
         try {
             connection = dataSource.getConnection();
             statement = connection.prepareStatement("SELECT ds_name, ds_type, url, username, password,"
-                    + " description, created_at, updated_at FROM " + EtlSchema.TABLE_DATASOURCE + " ORDER BY ds_name");
+                    + " description, extra, created_at, updated_at FROM " + EtlSchema.TABLE_DATASOURCE + " ORDER BY ds_name");
             rs = statement.executeQuery();
             while (rs.next()) {
                 DataSourceDef def = new DataSourceDef();
@@ -47,8 +47,9 @@ public class JdbcDataSourceRegistry {
                 def.setUsername(rs.getString(4));
                 def.setPassword(rs.getString(5));
                 def.setDescription(rs.getString(6));
-                def.setCreatedAt(rs.getLong(7));
-                def.setUpdatedAt(rs.getLong(8));
+                def.setExtra(rs.getString(7));
+                def.setCreatedAt(rs.getLong(8));
+                def.setUpdatedAt(rs.getLong(9));
                 defs.add(def);
             }
             return defs;
@@ -67,7 +68,7 @@ public class JdbcDataSourceRegistry {
         try {
             connection = dataSource.getConnection();
             statement = connection.prepareStatement("SELECT ds_name, ds_type, url, username, password,"
-                    + " description, created_at, updated_at FROM " + EtlSchema.TABLE_DATASOURCE
+                    + " description, extra, created_at, updated_at FROM " + EtlSchema.TABLE_DATASOURCE
                     + " WHERE ds_name = ?");
             statement.setString(1, name);
             rs = statement.executeQuery();
@@ -81,8 +82,9 @@ public class JdbcDataSourceRegistry {
             def.setUsername(rs.getString(4));
             def.setPassword(rs.getString(5));
             def.setDescription(rs.getString(6));
-            def.setCreatedAt(rs.getLong(7));
-            def.setUpdatedAt(rs.getLong(8));
+            def.setExtra(rs.getString(7));
+            def.setCreatedAt(rs.getLong(8));
+            def.setUpdatedAt(rs.getLong(9));
             return def;
         } catch (SQLException e) {
             throw new IllegalStateException("读取数据源失败: " + e.getMessage(), e);
@@ -112,31 +114,33 @@ public class JdbcDataSourceRegistry {
                 def.setCreatedAt(now);
                 def.setUpdatedAt(now);
                 insert = connection.prepareStatement("INSERT INTO " + EtlSchema.TABLE_DATASOURCE
-                        + " (ds_name, ds_type, url, username, password, description, created_at, updated_at)"
-                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                        + " (ds_name, ds_type, url, username, password, description, extra, created_at, updated_at)"
+                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 insert.setString(1, def.getName());
                 insert.setString(2, def.getType());
                 insert.setString(3, def.getUrl());
                 insert.setString(4, def.getUsername());
                 insert.setString(5, def.getPassword());
                 insert.setString(6, def.getDescription());
-                insert.setLong(7, def.getCreatedAt());
-                insert.setLong(8, def.getUpdatedAt());
+                insert.setString(7, def.getExtra());
+                insert.setLong(8, def.getCreatedAt());
+                insert.setLong(9, def.getUpdatedAt());
                 insert.executeUpdate();
                 return;
             }
             def.setCreatedAt(existing.getCreatedAt());
             def.setUpdatedAt(now);
             update = connection.prepareStatement("UPDATE " + EtlSchema.TABLE_DATASOURCE
-                    + " SET ds_type = ?, url = ?, username = ?, password = ?, description = ?, updated_at = ?"
+                    + " SET ds_type = ?, url = ?, username = ?, password = ?, description = ?, extra = ?, updated_at = ?"
                     + " WHERE ds_name = ?");
             update.setString(1, def.getType());
             update.setString(2, def.getUrl());
             update.setString(3, def.getUsername());
             update.setString(4, def.getPassword());
             update.setString(5, def.getDescription());
-            update.setLong(6, def.getUpdatedAt());
-            update.setString(7, def.getName());
+            update.setString(6, def.getExtra());
+            update.setLong(7, def.getUpdatedAt());
+            update.setString(8, def.getName());
             update.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("数据源登记失败: " + e.getMessage(), e);

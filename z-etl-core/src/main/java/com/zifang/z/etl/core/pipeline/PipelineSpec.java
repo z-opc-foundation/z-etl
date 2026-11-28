@@ -65,6 +65,14 @@ public class PipelineSpec {
     /** 管道级失败策略：{@code fail-fast}（缺省，任何算子失败即中断）/ {@code continue}（失败行走旁路计数，主循环不炸）。 */
     private String failurePolicy = "fail-fast";
 
+    /**
+     * 非结构化附加信息（画布坐标、发布状态这类**不参与执行**的元数据）。
+     *
+     * <p>执行引擎只认 nodes / edges / checkpoint / retry / mode；这个袋子里的东西改了不影响跑批，
+     * 纯粹是给上层台账挂自己的元数据（门户 ETL 台账的画布布局就挂这儿）。</p>
+     */
+    private Map<String, Object> extra = new LinkedHashMap<String, Object>();
+
     public String getName() {
         return name;
     }
@@ -124,9 +132,17 @@ public class PipelineSpec {
     public String getFailurePolicy() {
         return failurePolicy;
     }
-
     public void setFailurePolicy(String failurePolicy) {
         this.failurePolicy = failurePolicy;
+    }
+
+    /** 非结构化附加信息（不参与执行）。 */
+    public Map<String, Object> getExtra() {
+        return extra;
+    }
+
+    public void setExtra(Map<String, Object> extra) {
+        this.extra = extra == null ? new LinkedHashMap<String, Object>() : extra;
     }
 
     /** 按 id 取节点；取不到返回 {@code null}。 */

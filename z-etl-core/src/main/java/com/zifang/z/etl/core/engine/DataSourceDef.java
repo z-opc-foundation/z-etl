@@ -16,6 +16,8 @@ public class DataSourceDef {
     private String username;
     private String password;
     private String description;
+    /** 台账附加信息（JSON 文本）：显示名等非密元数据，不参与连接。 */
+    private String extra;
     private long createdAt;
     private long updatedAt;
 
@@ -65,6 +67,14 @@ public class DataSourceDef {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getExtra() {
+        return extra;
+    }
+
+    public void setExtra(String extra) {
+        this.extra = extra;
     }
 
     public long getCreatedAt() {

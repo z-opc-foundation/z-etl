@@ -52,6 +52,22 @@ public class EtlPipelineService {
     }
 
     /**
+     * 跨流水线最近运行（新→旧）。
+     */
+    @BizMethod(name = "最近运行", module = "z-etl", description = "跨流水线最近运行履历（新→旧）。", operation = BizMethod.Operation.QUERY)
+    public List<PipelineRunResult> recentRuns(int limit) {
+        return pipelineEngine.recentRuns(limit);
+    }
+
+    /**
+     * 删除流水线（定义 + 运行履历）。
+     */
+    @BizMethod(name = "删除流水线", module = "z-etl", description = "删除流水线定义与其运行履历。", operation = BizMethod.Operation.DELETE)
+    public boolean delete(String name) {
+        return pipelineEngine.delete(name);
+    }
+
+    /**
      * 登记 / 更新调度（cron）。
      *
      * @param pipelineName 流水线名

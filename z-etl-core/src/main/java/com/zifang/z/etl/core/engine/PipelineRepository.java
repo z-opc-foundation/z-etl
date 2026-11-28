@@ -28,4 +28,7 @@ public interface PipelineRepository {
 
     /** 跨流水线最近运行（新→旧，运行总览用）；{@code limit ≤ 0} 不限。 */
     List<PipelineRunResult> recentRuns(int limit);
+
+    /** 删除流水线定义（连同运行履历）；不存在返回 {@code false}。 */
+    boolean delete(String name);
 }

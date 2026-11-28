@@ -1,6 +1,7 @@
 package com.zifang.z.etl.web.api;
 
 import com.zifang.z.etl.core.engine.DataSourceDef;
+import com.zifang.z.etl.core.engine.DataSourceIntrospector;
 import com.zifang.z.etl.core.engine.EtlSchema;
 import com.zifang.z.etl.core.engine.JdbcDataSourceRegistry;
 import com.zifang.z.meta.api.annotation.BizApi;
@@ -31,6 +32,8 @@ import java.util.Map;
  *                                      编辑时 password 留空 = 保留旧密码）
  * DELETE /api/etl/datasources/{name}   删除
  * POST   /api/etl/datasources/test     测试连接（body 同上；已登记条目 password 留空 = 用库里存的）
+ * GET    /api/etl/datasources/{name}/tables  表结构探查（表清单 + 列）
+ * POST   /api/etl/datasources/{name}/preview 样例行预览（body = {table, limit}）
  * </pre>
  *
  * @author zifang
@@ -107,9 +110,71 @@ public class EtlDataSourceController {
         return body;
     }
 
+    /**
+     * 表结构探查（表清单 + 列）。
+     *
+     * <p>门户 ETL 台账要「选表 → 看列」，这个能力以前只在未来的参照实现里有；
+     * 现在由我们自己的 z-etl 提供，凭据不出 z-etl。</p>
+     */
+    @GetMapping("/{name}/tables")
+    @BizApi(summary = "数据源表结构", description = "列出可用的表 / 视图及其列（凭据留在 z-etl 侧）。", tags = {"z-etl"})
+    public Map<String, Object> tables(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "数据源名", position = BizParam.Position.PATH) String name) {
+        DataSourceDef def = registry.find(name);
+        if (def == null) {
+            throw new IllegalArgumentException("数据源不存在：" + name);
+        }
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("name", name);
+        body.put("tables", new DataSourceIntrospector().tables(def));
+        return body;
+    }
+
+    /**
+     * 样例行预览（读前 N 行）。
+     */
+    @PostMapping("/{name}/preview")
+    @BizApi(summary = "数据源样例行", description = "读取表的前 N 行（body = {\"table\":\"表名\",\"limit\":20}）。",
+            tags = {"z-etl"})
+    public Map<String, Object> preview(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "数据源名", position = BizParam.Position.PATH) String name,
+            @RequestBody(required = false) @BizParam(name = "query",
+                    type = BizField.FieldType.JSON, description = "{\"table\":\"表名\",\"limit\":20}",
+                    position = BizParam.Position.BODY) Map<String, Object> query) {
+        DataSourceDef def = registry.find(name);
+        if (def == null) {
+            throw new IllegalArgumentException("数据源不存在：" + name);
+        }
+        String table = query == null ? null : asString(query.get("table"));
+        if (table == null || table.trim().isEmpty()) {
+            throw new IllegalArgumentException("table 不能为空");
+        }
+        int limit = query == null || query.get("limit") == null ? 20 : asInt(query.get("limit"), 20);
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("name", name);
+        body.put("table", table);
+        body.put("rows", new DataSourceIntrospector().preview(def, table, limit));
+        return body;
+    }
+
     private static void requireName(DataSourceDef def) {
         if (def == null || def.getName() == null || def.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("数据源名不能为空");
+        }
+    }
+
+    private static String asString(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static int asInt(Object value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
     }
 
@@ -123,6 +188,7 @@ public class EtlDataSourceController {
             row.put("username", def.getUsername());
             row.put("password", def.getPassword() == null || def.getPassword().isEmpty() ? "" : PASSWORD_MASK);
             row.put("description", def.getDescription());
+            row.put("extra", def.getExtra());
             row.put("createdAt", def.getCreatedAt());
             row.put("updatedAt", def.getUpdatedAt());
             rows.add(row);

@@ -119,6 +119,7 @@ public final class EtlSchema {
                     + "username VARCHAR(128), "
                     + "password VARCHAR(256), "
                     + "description VARCHAR(512), "
+                    + "extra TEXT, "
                     + "created_at BIGINT, "
                     + "updated_at BIGINT)"
     };
@@ -135,7 +136,9 @@ public final class EtlSchema {
             "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_column VARCHAR(128)",
             "ALTER TABLE " + TABLE_JOB_CHECKPOINT + " ADD COLUMN tiebreak_value VARCHAR(256)",
             // 运行总览（046）：失败运行也落履历，老库补 status 列（旧行缺省当 SUCCESS）
-            "ALTER TABLE " + TABLE_PIPELINE_RUN + " ADD COLUMN status VARCHAR(16)"
+            "ALTER TABLE " + TABLE_PIPELINE_RUN + " ADD COLUMN status VARCHAR(16)",
+            // 台账附加信息：门户侧的数据源显示名 / 非密配置挂这里（不参与连接）
+            "ALTER TABLE " + TABLE_DATASOURCE + " ADD COLUMN extra TEXT"
     };
 
     private EtlSchema() {

@@ -35,6 +35,7 @@ import java.util.Map;
  * GET  /api/etl/pipelines/{name}/watermark 水位记录
  * GET  /api/etl/pipelines/{name}/runs      运行履历
  * POST /api/etl/pipelines/{name}/dry-run   试跑（跑 rows 行不落地）
+ * DELETE /api/etl/pipelines/{name}      删除流水线（定义 + 运行履历）
  * GET  /api/etl/pipelines/{name}/savepoint 导出保存点（状态快照 + 水位游标）
  * POST /api/etl/pipelines/{name}/savepoint/import 灌回保存点（覆盖写，可换名迁移）
  * POST /api/etl/pipelines/{name}/schedule  登记调度（body = cron 表达式）
@@ -89,6 +90,32 @@ public class EtlPipelineController {
                                         @BizParam(name = "recent", type = BizField.FieldType.INTEGER,
                                         description = "最近运行明细条数", position = BizParam.Position.QUERY) int recent) {
         return service.overview(recent);
+    }
+
+    /**
+     * 删除流水线（定义 + 运行履历）。
+     */
+    @DeleteMapping("/{name}")
+    @BizApi(summary = "删除流水线", description = "删除流水线定义与其运行履历。", tags = {"z-etl"})
+    public Map<String, Object> delete(@PathVariable("name") @BizParam(name = "name",
+            type = BizField.FieldType.STRING, description = "流水线名", position = BizParam.Position.PATH) String name) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("pipeline", name);
+        body.put("removed", service.delete(name));
+        return body;
+    }
+
+    /**
+     * 跨流水线最近运行（新→旧）。
+     */
+    @GetMapping("/runs")
+    @BizApi(summary = "最近运行", description = "跨流水线最近运行履历（新→旧）。", tags = {"z-etl"})
+    public Map<String, Object> recentRuns(@RequestParam(value = "limit", defaultValue = "50")
+            @BizParam(name = "limit", type = BizField.FieldType.INTEGER, description = "条数上限",
+                    position = BizParam.Position.QUERY) int limit) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("runs", service.recentRuns(limit));
+        return body;
     }
 
     /**

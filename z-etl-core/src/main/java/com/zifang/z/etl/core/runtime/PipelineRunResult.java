@@ -21,6 +21,7 @@ public class PipelineRunResult {
     public static final String STATUS_FAILED = "FAILED";
 
     private String pipelineName;
+    private String runId;
     private String mode;
     private String status = STATUS_SUCCESS;
     private long startedAt;
@@ -39,6 +40,15 @@ public class PipelineRunResult {
 
     public String getPipelineName() {
         return pipelineName;
+    }
+
+    /** 运行标识（落库主键；对外引用一次运行用它）。 */
+    public String getRunId() {
+        return runId;
+    }
+
+    public void setRunId(String runId) {
+        this.runId = runId;
     }
 
     public void setPipelineName(String pipelineName) {

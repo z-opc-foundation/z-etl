@@ -122,6 +122,16 @@ public class PipelineEngine {
     }
 
     /**
+     * 删除流水线（定义 + 运行履历）。
+     *
+     * @param name 流水线名
+     * @return 删掉了返回 {@code true}；本来就没有返回 {@code false}
+     */
+    public boolean delete(String name) {
+        return repository.delete(name);
+    }
+
+    /**
      * 触发流水线（取落库定义执行，履历落库）。
      *
      * @param name 流水线名
